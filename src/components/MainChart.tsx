@@ -44,6 +44,12 @@ export function MainChart({ dataset, selected, xAxis, mode }: MainChartProps) {
   const hybrid = !stacked && analogColumns.length > 0 && booleanColumns.length > 0;
   const panelColumns = stacked || analogColumns.length === 0 ? columns : booleanColumns;
   const mainHeight = Math.max(40, 66 - booleanColumns.length * 9);
+  // Every synchronized panel must use the exact same horizontal plot area.
+  // Otherwise the same category index maps to a different pixel in the flag
+  // panels whenever the main panel reserves room for multiple Y axes.
+  const sharedRight = mode === 'individual'
+    ? 72 + Math.max(0, analogColumns.length - 2) * 58
+    : 34;
   const grids = stacked || analogColumns.length === 0
     ? panelColumns.map((_, index) => ({
         left: 70,
@@ -53,21 +59,25 @@ export function MainChart({ dataset, selected, xAxis, mode }: MainChartProps) {
       }))
     : hybrid
       ? [
-          { left: 70, right: mode === 'individual' ? 72 + Math.max(0, analogColumns.length - 2) * 58 : 34, top: 62, height: `${mainHeight}%` },
+          { left: 70, right: sharedRight, top: 62, height: `${mainHeight}%` },
           ...booleanColumns.map((_, index) => ({
             left: 70,
-            right: 34,
+            right: sharedRight,
             top: `${14 + mainHeight + index * 10}%`,
             height: '7%',
           })),
         ]
-      : [{ left: 70, right: mode === 'individual' ? 72 + Math.max(0, analogColumns.length - 2) * 58 : 34, top: 62, bottom: 96 }];
+      : [{ left: 70, right: sharedRight, top: 62, bottom: 96 }];
   const gridIndexFor = (column: ColumnDefinition, columnIndex: number) => {
     if (stacked || analogColumns.length === 0) return columnIndex;
     if (hybrid && column.type === 'boolean') return booleanColumns.indexOf(column) + 1;
     return 0;
   };
-  const niceTickIndexes = buildNiceTickIndexes(xValues);
+  const numericXAxis = xValues.length > 0 && xValues.every((value) => typeof value === 'number' && Number.isFinite(value));
+  const niceTickIndexes = buildNiceTickIndexes(xValues, 20);
+  const numericXValues = numericXAxis ? xValues as number[] : [];
+  const numericXMin = numericXAxis ? numericXValues.reduce((minimum, value) => Math.min(minimum, value), Infinity) : undefined;
+  const numericXMax = numericXAxis ? numericXValues.reduce((maximum, value) => Math.max(maximum, value), -Infinity) : undefined;
 
   const option = {
     animation: false,
@@ -96,10 +106,13 @@ export function MainChart({ dataset, selected, xAxis, mode }: MainChartProps) {
       feature: { dataZoom: { yAxisIndex: 'none' }, restore: {}, saveAsImage: { pixelRatio: 2 } },
     },
     xAxis: grids.map((_, index) => ({
-      type: 'category',
+      type: numericXAxis ? 'value' : 'category',
       gridIndex: index,
-      data: xValues,
-      boundaryGap: false,
+      data: numericXAxis ? undefined : xValues,
+      min: numericXMin,
+      max: numericXMax,
+      splitNumber: numericXAxis ? 20 : undefined,
+      boundaryGap: numericXAxis ? [0, 0] : false,
       name: index === grids.length - 1
         ? xAxisName
         : '',
@@ -113,7 +126,9 @@ export function MainChart({ dataset, selected, xAxis, mode }: MainChartProps) {
         fontSize: 13,
         margin: 10,
         show: index === grids.length - 1,
-        interval: (tickIndex: number) => niceTickIndexes.has(tickIndex),
+        interval: numericXAxis ? undefined : (tickIndex: number) => niceTickIndexes.has(tickIndex),
+        showMinLabel: true,
+        showMaxLabel: true,
         formatter: (value: string) => {
           const numeric = Number(value);
           return Number.isFinite(numeric) ? Number(numeric.toPrecision(10)).toLocaleString() : value;
@@ -148,9 +163,10 @@ export function MainChart({ dataset, selected, xAxis, mode }: MainChartProps) {
       type: 'line',
       xAxisIndex: gridIndexFor(column, index),
       yAxisIndex: index,
-      data: dataset.rows.map((row) => {
+      data: dataset.rows.map((row, rowIndex) => {
         const value = numericValue(row[column.id]);
-        return mode === 'normalized' ? normalizedValue(value, column) : value;
+        const displayedValue = mode === 'normalized' ? normalizedValue(value, column) : value;
+        return numericXAxis ? [numericXValues[rowIndex], displayedValue] : displayedValue;
       }),
       showSymbol: false,
       sampling: 'lttb',

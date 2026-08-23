@@ -9,9 +9,10 @@ describe('chart axis labels', () => {
     expect(indexes.has(values.length - 1)).toBe(true);
   });
 
-  it('chooses round intermediate values', () => {
+  it('chooses roughly one-second labels for a twenty-second recording', () => {
     const values = Array.from({ length: 1024 }, (_, index) => index * 0.02);
-    const labels = [...buildNiceTickIndexes(values)].map((index) => values[index]);
-    expect(labels).toEqual(expect.arrayContaining([0, 5, 10, 15, 20, 20.46]));
+    const labels = [...buildNiceTickIndexes(values, 20)].map((index) => values[index]);
+    expect(labels).toEqual(expect.arrayContaining([0, 1, 2, 10, 19, 20, 20.46]));
+    expect(labels.length).toBeGreaterThanOrEqual(21);
   });
 });

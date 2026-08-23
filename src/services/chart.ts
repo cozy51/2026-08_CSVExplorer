@@ -3,7 +3,7 @@ function niceStep(range: number, targetTicks = 8): number {
   const rough = range / targetTicks;
   const power = 10 ** Math.floor(Math.log10(rough));
   const fraction = rough / power;
-  const niceFraction = fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10;
+  const niceFraction = fraction <= 1.5 ? 1 : fraction <= 3 ? 2 : fraction <= 7 ? 5 : 10;
   return niceFraction * power;
 }
 
