@@ -13,8 +13,12 @@ const DAY_MS = 86_400_000;
 const TIME_NAME = /^(時間|時刻|time)$/i;
 const MSEC_NAME = /^(msec|ミリ秒|millisecond)$/i;
 const CLOCK = /^(\d{1,3}):(\d{2}):(\d{2})(?:[.,](\d{1,3}))?$/;
+/** A PLC address such as X00, Y9f or X0f～X08 labels its own column, nothing after it. */
+const BIT_ADDRESS = /^[XY][0-9a-f]{2,3}(?:\s*[～~-]\s*[XY]?[0-9a-f]{2,3})?$/i;
 /** Recorders sample on a round period; the measured one only has to pick it out. */
 const SAMPLE_PERIODS_MS = [0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 4, 5, 8, 10, 16, 20, 25, 32, 40, 50, 64, 100, 125, 200, 250, 500, 1000, 2000, 5000];
+
+interface TraceVariant { id: string; name: string; msec: boolean }
 
 /**
  * Trace CSV layout (a recording of roughly 30 seconds):
@@ -24,14 +28,39 @@ const SAMPLE_PERIODS_MS = [0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 4, 5, 8, 10, 16, 20, 
  *   3  ,,,,位置,,,,,,衝突防止センサ(上),,,  … classification, repeats omitted
  *   4  時間,msec,アラーム,サブコード,…      … column names
  *   5+ 00:04:09,065,4364,0x01,…             … samples
+ *
+ * The second variant of the same log has no msec column and keeps the
+ * milliseconds in the clock instead:
+ *
+ *   4  時間,アラーム,サブコード,ポイント,…
+ *   5+ 17:19:31.234,0000,0x00,00704,…
  */
-function locateHeaderRow(matrix: string[][]): number {
+const TRACE: TraceVariant = { id: 'trace', name: 'Trace CSV (trc)', msec: true };
+const TRACE_2: TraceVariant = { id: 'trace2', name: 'Trace CSV 2 (msec無し)', msec: false };
+const TIME_BASE_LABELS = {
+  clock: '時間列のミリ秒',
+  uniform: '時間列の秒差を行数で等分',
+  cells: '時間列とmsec',
+} as const;
+/**
+ * The header row names 時間; the row above it may do so as well, so it only
+ * counts when the msec column follows or the next row already holds samples.
+ */
+function headerRowIndex(matrix: string[][]): number {
   const limit = Math.min(matrix.length, 15);
   for (let index = 0; index < limit; index += 1) {
     const cells = matrix[index].map((cell) => cell.trim());
-    if (cells.some((cell) => TIME_NAME.test(cell)) && cells.some((cell) => MSEC_NAME.test(cell))) return index;
+    if (!cells.some((cell) => TIME_NAME.test(cell))) continue;
+    if (cells.some((cell) => MSEC_NAME.test(cell))) return index;
+    if (CLOCK.test((matrix[index + 1]?.[0] ?? '').trim())) return index;
   }
-  const scored = matrix.slice(0, limit)
+  return -1;
+}
+
+function locateHeaderRow(matrix: string[][]): number {
+  const found = headerRowIndex(matrix);
+  if (found >= 0) return found;
+  const scored = matrix.slice(0, Math.min(matrix.length, 15))
     .map((row, index) => ({ index, score: scoreHeader(row) }))
     .sort((left, right) => right.score - left.score);
   return scored[0]?.index ?? 0;
@@ -55,7 +84,12 @@ function expandClassification(row: string[] = [], width = row.length): string[] 
   let current = '';
   return Array.from({ length: width }, (_, index) => {
     const label = (row[index] ?? '').trim();
-    if (label) current = label;
+    if (label) {
+      // Addresses name a single column, so they must not run into the blanks
+      // that follow — those columns simply have no classification.
+      current = BIT_ADDRESS.test(label) ? '' : label;
+      return label;
+    }
     return current;
   });
 }
@@ -88,15 +122,23 @@ function timeOfDayMs(value: string): number | undefined {
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
+type TimeBase = 'clock' | 'uniform' | 'cells';
+
 /**
  * The recorder's clock drifts, and msec counts scans rather than milliseconds of
- * the current second, so neither cell locates a sample precisely. The seconds in
- * 時間 are trustworthy in aggregate — a 3,000 row file spans exactly 30 s — so
- * the samples are spread evenly over that span instead.
+ * the current second, so in that variant neither cell locates a sample: the
+ * seconds in 時間 are trustworthy in aggregate — a 3,000 row file spans exactly
+ * 30 s — so the samples are spread evenly over that span. When the clock itself
+ * carries milliseconds (17:19:31.234) it is precise enough to use as it stands.
  */
-function elapsedSeconds(rawRows: string[][], timeIndex: number, msecIndex: number): number[] | undefined {
+function elapsedSeconds(
+  rawRows: string[][],
+  timeIndex: number,
+  msecIndex: number,
+): { values: number[]; base: TimeBase } | undefined {
   if (timeIndex < 0) return undefined;
-  const wraps = CLOCK.test((rawRows[0]?.[timeIndex] ?? '').trim());
+  const opening = CLOCK.exec((rawRows[0]?.[timeIndex] ?? '').trim());
+  const wraps = Boolean(opening);
   const stamps: number[] = [];
   let offset = 0;
   let previous: number | undefined;
@@ -113,19 +155,26 @@ function elapsedSeconds(rawRows: string[][], timeIndex: number, msecIndex: numbe
     stamps.push(stamp);
   }
 
+  if (opening?.[4]) {
+    return { values: stamps.map((stamp) => Number(((stamp - stamps[0]) / 1000).toFixed(3))), base: 'clock' };
+  }
+
   const spanMs = stamps.at(-1)! - stamps[0];
   if (stamps.length > 1 && spanMs > 0) {
     // Rounding the period keeps the axis readable: 0.01, 0.02, 0.03 … instead of
     // 0.010003334444814937.
     const period = tidyPeriod(spanMs / (stamps.length - 1));
-    return stamps.map((_, index) => Number(((index * period) / 1000).toFixed(6)));
+    return { values: stamps.map((_, index) => Number(((index * period) / 1000).toFixed(6))), base: 'uniform' };
   }
 
   // Too short to measure a period: fall back to the cells themselves.
-  return stamps.map((stamp, index) => {
-    const millis = msecIndex < 0 ? 0 : Number(rawRows[index][msecIndex] ?? 0);
-    return (stamp - stamps[0] + (Number.isFinite(millis) ? millis : 0)) / 1000;
-  });
+  return {
+    values: stamps.map((stamp, index) => {
+      const millis = msecIndex < 0 ? 0 : Number(rawRows[index][msecIndex] ?? 0);
+      return (stamp - stamps[0] + (Number.isFinite(millis) ? millis : 0)) / 1000;
+    }),
+    base: 'cells',
+  };
 }
 
 function tidyPeriod(periodMs: number): number {
@@ -168,20 +217,29 @@ function usedWidth(headers: string[], rawRows: string[][]): number {
   return width;
 }
 
-function detectTrace(context: ParseContext): number {
-  const head = context.text.replace(/^\uFEFF/, '').split(/\r?\n/).slice(0, 12).join('\n');
-  let confidence = 0;
-  if (/^\s*時間\s*,\s*msec\s*,/m.test(head)) confidence += 0.45;
-  else if (/msec/i.test(head) && /時間|時刻|time/i.test(head)) confidence += 0.3;
-  if (/ログ日時/.test(head)) confidence += 0.2;
-  if (/号機番号/.test(head)) confidence += 0.1;
-  if (/バージョン/.test(head)) confidence += 0.05;
-  if (/^\d{1,3}:\d{2}:\d{2},\d{1,3},/m.test(head)) confidence += 0.15;
+function detectTrace(context: ParseContext, variant: TraceVariant): number {
+  const lines = context.text.replace(/^\uFEFF/, '').split(/\r?\n/).slice(0, 12);
+  const matrix = parseCsv(lines.join('\n'));
+  const index = headerRowIndex(matrix);
+  if (index < 0) return 0;
+  const header = matrix[index].map((cell) => cell.trim());
+  // Both variants are the same log; the msec column is what tells them apart.
+  if (header.some((cell) => MSEC_NAME.test(cell)) !== variant.msec) return 0;
+
+  const body = lines.join('\n');
+  let confidence = TIME_NAME.test(header[0]) ? 0.45 : 0.3;
+  if (/ログ日時/.test(body)) confidence += 0.2;
+  if (/号機番号/.test(body)) confidence += 0.1;
+  if (/バージョン/.test(body)) confidence += 0.05;
+  const sample = variant.msec
+    ? /^\d{1,3}:\d{2}:\d{2},\s*\d{1,3},/m
+    : /^\d{1,3}:\d{2}:\d{2}[.,]\d{1,3},/m;
+  if (sample.test(body)) confidence += 0.15;
   if (/trc[_-]?\d+/i.test(context.fileName)) confidence += 0.25;
   return Math.min(0.98, confidence);
 }
 
-function parseTrace(context: ParseContext, confidence = 0.8): ParsedDataset {
+function parseTrace(context: ParseContext, confidence: number, variant: TraceVariant): ParsedDataset {
   const delimiter = detectDelimiter(context.text);
   const matrix = parseCsv(context.text.replace(/^\uFEFF/, ''), delimiter);
   if (matrix.length < 2) throw new Error('CSVにデータがありません。');
@@ -219,19 +277,21 @@ function parseTrace(context: ParseContext, confidence = 0.8): ParsedDataset {
       group: 'Time',
       unit: 's',
       type: 'number',
-      stats: numericStats(elapsed),
+      stats: numericStats(elapsed.values),
     };
     columns.unshift(derived);
-    rows = rows.map((row, index) => ({ ...row, [derived.id]: elapsed[index] as CellValue }));
+    rows = rows.map((row, index) => ({ ...row, [derived.id]: elapsed.values[index] as CellValue }));
     xAxis = derived;
-    durationMs = (elapsed.at(-1)! - elapsed[0]) * 1000;
+    durationMs = (elapsed.values.at(-1)! - elapsed.values[0]) * 1000;
   }
+
+  const intervals = elapsed && elapsed.values.length > 1 ? elapsed.values.length - 1 : 0;
 
   return {
     metadata: {
       fileName: context.fileName,
-      formatId: 'trace',
-      formatName: 'Trace CSV (trc)',
+      formatId: variant.id,
+      formatName: variant.name,
       confidence,
       delimiter,
       xAxisId: xAxis?.id,
@@ -243,8 +303,9 @@ function parseTrace(context: ParseContext, confidence = 0.8): ParsedDataset {
         machineNumber: headline['号機番号'] ?? '不明',
         version: headline['バージョン'] ?? '不明',
         startTime: (samples[0]?.[timeIndex] ?? '').trim() || '不明',
-        sampleIntervalMs: elapsed && elapsed.length > 1
-          ? Number(((elapsed[1] - elapsed[0]) * 1000).toFixed(3))
+        timeBase: elapsed ? TIME_BASE_LABELS[elapsed.base] : 'なし',
+        sampleIntervalMs: intervals
+          ? Number((durationMs! / intervals).toFixed(3))
           : 'なし',
         classificationRow: classificationIndex >= 0 ? classificationIndex + 1 : 'なし',
         headerRow: headerIndex + 1,
@@ -257,10 +318,17 @@ function parseTrace(context: ParseContext, confidence = 0.8): ParsedDataset {
 }
 
 export const traceCsvFormat: CsvFormatAdapter = {
-  id: 'trace',
-  name: 'Trace CSV (trc)',
-  detect: detectTrace,
-  parse: parseTrace,
+  id: TRACE.id,
+  name: TRACE.name,
+  detect: (context) => detectTrace(context, TRACE),
+  parse: (context, confidence = 0.8) => parseTrace(context, confidence, TRACE),
+};
+
+export const traceCsv2Format: CsvFormatAdapter = {
+  id: TRACE_2.id,
+  name: TRACE_2.name,
+  detect: (context) => detectTrace(context, TRACE_2),
+  parse: (context, confidence = 0.8) => parseTrace(context, confidence, TRACE_2),
 };
 
 export const traceInternals = { classifiedNames, tidyPeriod, expandClassification, readHeadline, timeOfDayMs };

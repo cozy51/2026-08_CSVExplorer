@@ -1,11 +1,12 @@
 import { genericCsvFormat } from '../formats/generic';
-import { traceCsvFormat } from '../formats/trace';
+import { traceCsv2Format, traceCsvFormat } from '../formats/trace';
 import { yaskawaServoFormat } from '../formats/yaskawaServo';
 import type { CsvFormatAdapter, ParseContext } from '../models/dataset';
 
 export const formats: CsvFormatAdapter[] = [
   yaskawaServoFormat,
   traceCsvFormat,
+  traceCsv2Format,
   genericCsvFormat,
 ];
 
