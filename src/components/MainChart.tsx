@@ -1,5 +1,6 @@
 import ReactECharts from 'echarts-for-react';
-import type { ColumnDefinition, ParsedDataset } from '../models/dataset';
+import { useRef, useState } from 'react';
+import type { ColumnDefinition, ParsedDataset, SeriesAppearance } from '../models/dataset';
 import { buildNiceTickIndexes } from '../services/chart';
 
 export type ChartMode = 'individual' | 'normalized' | 'stacked';
@@ -9,6 +10,8 @@ interface MainChartProps {
   selected: string[];
   xAxis: string;
   mode: ChartMode;
+  onJumpToRow?: (rowIndex: number) => void;
+  appearances: Record<string, SeriesAppearance>;
 }
 
 const palette = ['#176b87', '#d97738', '#557a46', '#8a5b9d', '#b4443e', '#2874a6'];
@@ -24,7 +27,9 @@ function normalizedValue(value: number | null, column: ColumnDefinition): number
   return range === 0 ? 0 : ((value - column.stats.min) / range) * 100;
 }
 
-export function MainChart({ dataset, selected, xAxis, mode }: MainChartProps) {
+export function MainChart({ dataset, selected, xAxis, mode, onJumpToRow, appearances }: MainChartProps) {
+  const chartRef = useRef<{ getEchartsInstance(): { convertFromPixel(finder: object, value: number[]): unknown } }>(null);
+  const [contextMenu, setContextMenu] = useState<{ left: number; top: number; rowIndex: number }>();
   const columns = selected
     .map((id) => dataset.columns.find((column) => column.id === id))
     .filter((column): column is ColumnDefinition => Boolean(column));
@@ -92,6 +97,7 @@ export function MainChart({ dataset, selected, xAxis, mode }: MainChartProps) {
       itemHeight: 12,
       itemGap: 22,
       textStyle: { color: '#263941', fontSize: 14 },
+      selectedMode: false,
     },
     tooltip: {
       trigger: 'axis',
@@ -149,9 +155,9 @@ export function MainChart({ dataset, selected, xAxis, mode }: MainChartProps) {
       max: column.type === 'boolean' ? 1.1 : undefined,
       position: !stacked && column.type !== 'boolean' && analogColumns.indexOf(column) > 0 ? 'right' : 'left',
       offset: !stacked && column.type !== 'boolean' && analogColumns.indexOf(column) > 1 ? (analogColumns.indexOf(column) - 1) * 58 : 0,
-      axisLine: { show: true, lineStyle: { color: palette[index % palette.length], width: 1.6 } },
-      axisTick: { show: true, lineStyle: { color: palette[index % palette.length], width: 1.4 } },
-      axisLabel: { color: palette[index % palette.length], fontSize: 13, fontWeight: 500, margin: 10 },
+      axisLine: { show: true, lineStyle: { color: appearances[column.id]?.color ?? palette[index % palette.length], width: 1.6 } },
+      axisTick: { show: true, lineStyle: { color: appearances[column.id]?.color ?? palette[index % palette.length], width: 1.4 } },
+      axisLabel: { color: appearances[column.id]?.color ?? palette[index % palette.length], fontSize: 13, fontWeight: 500, margin: 10 },
       splitLine: { lineStyle: { color: '#dce3e5', width: 1.2 } },
     })),
     dataZoom: [
@@ -170,12 +176,48 @@ export function MainChart({ dataset, selected, xAxis, mode }: MainChartProps) {
       }),
       showSymbol: false,
       sampling: 'lttb',
-      lineStyle: { width: 2.2 },
+      itemStyle: { color: appearances[column.id]?.color ?? palette[index % palette.length] },
+      lineStyle: {
+        color: appearances[column.id]?.color ?? palette[index % palette.length],
+        width: appearances[column.id]?.width ?? 2.2,
+        type: appearances[column.id]?.lineType ?? 'solid',
+      },
       step: column.type === 'boolean' ? 'end' : false,
       connectNulls: false,
       large: true,
     })),
   };
 
-  return <div className="chart"><ReactECharts option={option} notMerge style={{ height: '100%', width: '100%' }} /></div>;
+  return <div className="chart chart-context" onClick={() => setContextMenu(undefined)} onContextMenu={event => {
+    event.preventDefault();
+    const instance = chartRef.current?.getEchartsInstance();
+    const converted = instance?.convertFromPixel(
+      { xAxisIndex: 0 },
+      [event.nativeEvent.offsetX, event.nativeEvent.offsetY],
+    );
+    const rawXValue = Array.isArray(converted) ? converted[0] : converted;
+    let rowIndex: number;
+    if (numericXAxis) {
+      const xValue = Number(rawXValue);
+      if (!Number.isFinite(xValue)) return;
+      rowIndex = 0;
+      for (let index = 1; index < xValues.length; index += 1) {
+        if (Math.abs(Number(xValues[index]) - xValue) < Math.abs(Number(xValues[rowIndex]) - xValue)) {
+          rowIndex = index;
+        }
+      }
+    } else {
+      rowIndex = xValues.findIndex(value => String(value) === String(rawXValue));
+      if (rowIndex < 0 && typeof rawXValue === 'number') rowIndex = Math.round(rawXValue);
+      if (rowIndex < 0 || rowIndex >= xValues.length) return;
+    }
+    const bounds = event.currentTarget.getBoundingClientRect();
+    setContextMenu({ left: event.clientX - bounds.left, top: event.clientY - bounds.top, rowIndex });
+  }}>
+    <ReactECharts ref={chartRef} option={option} notMerge style={{ height: '100%', width: '100%' }} />
+    {contextMenu && <div className="chart-menu" style={{ left: contextMenu.left, top: contextMenu.top }} onClick={event => event.stopPropagation()}>
+      <small>Row {contextMenu.rowIndex + 1}</small>
+      <button onClick={() => onJumpToRow?.(contextMenu.rowIndex)}>Dataでこの行を表示</button>
+    </div>}
+  </div>;
 }

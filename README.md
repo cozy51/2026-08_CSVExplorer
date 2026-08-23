@@ -62,8 +62,9 @@ Auto は全 adapter の confidence を比較し、最高得点を採用します
 - 数値グラフとBoolean段で左右のプロット境界を統一し、同時刻を同じ垂直位置へ描画
 - 数値X軸は約20分割を目安にし、ズーム範囲に応じてEChartsが目盛り間隔と本数を自動調整
 - 個別Y軸、正規化、同期した段組み表示
-- ページングされた Data 表
+- グラフ右クリックから該当行へ移動できる、IndexedDBベースの連続仮想スクロールData表
+- 左のチェックで系列を追加・削除し、選択系列ごとに色・実線／破線／点線・線幅を設定（上の凡例は確認専用）
 
 ## 大きなファイル
 
-グラフはアニメーションを無効化し LTTB sampling と ECharts の large mode を利用します。列フィルタと X 軸候補は memoize され、Data 表は一度に 100 行だけ描画します。非常に大きなファイルでは、将来 parser を Web Worker へ移す余地を Adapter 境界が提供します。
+グラフはアニメーションを無効化し LTTB sampling と ECharts の large mode を利用します。列フィルタと X 軸候補は memoize され、Data 表はIndexedDBから一度に60行だけ読み込んで描画します。非常に大きなファイルでは、将来 parser を Web Worker へ移す余地を Adapter 境界が提供します。

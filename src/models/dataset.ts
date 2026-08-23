@@ -7,3 +7,4 @@ export interface DatasetMetadata { fileName: string; formatId: string; formatNam
 export interface ParsedDataset { metadata: DatasetMetadata; columns: ColumnDefinition[]; rows: DataRow[] }
 export interface ParseContext { fileName: string; text: string }
 export interface CsvFormatAdapter { id: string; name: string; detect(context: ParseContext): number; parse(context: ParseContext, confidence?: number): ParsedDataset }
+export interface SeriesAppearance { color: string; lineType: 'solid' | 'dashed' | 'dotted'; width: number }
