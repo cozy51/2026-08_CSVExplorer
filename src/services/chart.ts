@@ -40,3 +40,26 @@ export function computeZoomWindow(start: number, end: number, zoomIn: boolean) {
 export function wheelZoomAxis(shiftKey: boolean): 'x' | 'y' {
   return shiftKey ? 'y' : 'x';
 }
+
+export interface AxisZoomRange {
+  id?: string;
+  start?: number;
+  end?: number;
+}
+
+export function yZoomId(index: number): string {
+  return `y-wheel-zoom-${index}`;
+}
+
+/**
+ * Y-axis wheel zoom is dispatched by hand, so the next window has to be derived
+ * from the ranges ECharts currently reports rather than from React state. A
+ * missing component means the axis is still at its full extent.
+ */
+export function buildYZoomBatch(zoomOptions: AxisZoomRange[] | undefined, axisCount: number, zoomIn: boolean) {
+  return Array.from({ length: Math.max(0, axisCount) }, (_, index) => {
+    const dataZoomId = yZoomId(index);
+    const zoom = zoomOptions?.find((item) => item.id === dataZoomId);
+    return { dataZoomId, ...computeZoomWindow(zoom?.start ?? 0, zoom?.end ?? 100, zoomIn) };
+  });
+}
