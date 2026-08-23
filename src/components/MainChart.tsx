@@ -1,8 +1,8 @@
 import ReactECharts from 'echarts-for-react';
 import { useEffect, useRef } from 'react';
 import type { ColumnDefinition, ParsedDataset, SeriesAppearance } from '../models/dataset';
-import { buildNiceTickIndexes, buildYZoomBatch, wheelZoomAxis, yZoomId } from '../services/chart';
-import type { AxisZoomRange } from '../services/chart';
+import { buildNiceTickIndexes, buildTooltipMarkup, buildYZoomBatch, wheelZoomAxis, yZoomId } from '../services/chart';
+import type { AxisZoomRange, TooltipSeriesParam } from '../services/chart';
 
 export type ChartMode = 'individual' | 'normalized' | 'stacked';
 
@@ -137,6 +137,8 @@ export function MainChart({ dataset, selected, xAxis, mode, appearances }: MainC
     tooltip: {
       trigger: 'axis',
       order: 'seriesAsc',
+      formatter: (params: TooltipSeriesParam | TooltipSeriesParam[]) =>
+        buildTooltipMarkup(Array.isArray(params) ? params : [params]),
       axisPointer: { type: 'cross', snap: true },
       backgroundColor: 'rgba(255,255,255,.97)',
       borderColor: '#ccd4d8',
@@ -199,14 +201,16 @@ export function MainChart({ dataset, selected, xAxis, mode, appearances }: MainC
     dataZoom: [
       { id: 'x-wheel-zoom', type: 'inside', xAxisIndex: grids.map((_, index) => index), filterMode: 'none', zoomOnMouseWheel: true, moveOnMouseWheel: false },
       { type: 'slider', xAxisIndex: grids.map((_, index) => index), height: 22, bottom: 14 },
-      ...columns.map((_, index) => ({
+      ...columns.map((column, index) => ({
         id: yZoomId(index),
         type: 'inside',
         yAxisIndex: index,
         filterMode: 'none',
         zoomOnMouseWheel: false,
         moveOnMouseWheel: false,
-        moveOnMouseMove: false,
+        // Dragging pans X and Y together. Boolean panels stay pinned to their
+        // 0/1 range, so only the analog axes follow the pointer vertically.
+        moveOnMouseMove: column.type !== 'boolean',
       })),
     ],
     series: columns.map((column, index) => ({
@@ -235,6 +239,6 @@ export function MainChart({ dataset, selected, xAxis, mode, appearances }: MainC
 
   return <div className="chart chart-context" ref={containerRef}>
     <ReactECharts ref={chartRef} option={option} notMerge style={{ height: '100%', width: '100%' }} />
-    <span className="zoom-help">ホイール: X軸ズーム · Shift＋ホイール: Y軸ズーム</span>
+    <span className="zoom-help">ホイール: X軸ズーム · Shift＋ホイール: Y軸ズーム · ドラッグ: 移動</span>
   </div>;
 }
