@@ -137,8 +137,13 @@ export function MainChart({ dataset, selected, xAxis, mode, appearances }: MainC
     tooltip: {
       trigger: 'axis',
       order: 'seriesAsc',
-      formatter: (params: TooltipSeriesParam | TooltipSeriesParam[]) =>
-        buildTooltipMarkup(Array.isArray(params) ? params : [params]),
+      formatter: (params: TooltipSeriesParam | TooltipSeriesParam[]) => {
+        const list = Array.isArray(params) ? params : [params];
+        return buildTooltipMarkup(list.map((param) => ({
+          ...param,
+          isBoolean: columns[param.seriesIndex]?.type === 'boolean',
+        })));
+      },
       axisPointer: { type: 'cross', snap: true },
       backgroundColor: 'rgba(255,255,255,.97)',
       borderColor: '#ccd4d8',
@@ -181,23 +186,38 @@ export function MainChart({ dataset, selected, xAxis, mode, appearances }: MainC
       },
       axisPointer: { show: true, snap: true },
     })),
-    yAxis: columns.map((column, index) => ({
-      type: 'value',
-      gridIndex: gridIndexFor(column, index),
-      name: (stacked || column.type === 'boolean') ? `${column.name}${column.unit ? ` [${column.unit}]` : ''}` : undefined,
-      nameLocation: 'middle',
-      nameGap: stacked ? 52 : 40,
-      nameTextStyle: { fontSize: 13, fontWeight: 600 },
-      scale: column.type !== 'boolean',
-      min: column.type === 'boolean' ? -0.1 : undefined,
-      max: column.type === 'boolean' ? 1.1 : undefined,
-      position: !stacked && column.type !== 'boolean' && analogColumns.indexOf(column) > 0 ? 'right' : 'left',
-      offset: !stacked && column.type !== 'boolean' && analogColumns.indexOf(column) > 1 ? (analogColumns.indexOf(column) - 1) * 58 : 0,
-      axisLine: { show: true, lineStyle: { color: appearances[column.id]?.color ?? palette[index % palette.length], width: 1.6 } },
-      axisTick: { show: true, lineStyle: { color: appearances[column.id]?.color ?? palette[index % palette.length], width: 1.4 } },
-      axisLabel: { color: appearances[column.id]?.color ?? palette[index % palette.length], fontSize: 13, fontWeight: 500, margin: 10 },
-      splitLine: { lineStyle: { color: '#dce3e5', width: 1.2 } },
-    })),
+    yAxis: columns.map((column, index) => {
+      const isBoolean = column.type === 'boolean';
+      return {
+        type: 'value',
+        gridIndex: gridIndexFor(column, index),
+        name: (stacked || isBoolean) ? `${column.name}${column.unit ? ` [${column.unit}]` : ''}` : undefined,
+        nameLocation: 'middle',
+        nameGap: stacked ? 52 : 40,
+        nameTextStyle: { fontSize: 13, fontWeight: 600 },
+        scale: !isBoolean,
+        min: isBoolean ? -0.1 : undefined,
+        max: isBoolean ? 1.1 : undefined,
+        position: !stacked && !isBoolean && analogColumns.indexOf(column) > 0 ? 'right' : 'left',
+        offset: !stacked && !isBoolean && analogColumns.indexOf(column) > 1 ? (analogColumns.indexOf(column) - 1) * 58 : 0,
+        axisLine: { show: true, lineStyle: { color: appearances[column.id]?.color ?? palette[index % palette.length], width: 1.6 } },
+        axisTick: { show: true, lineStyle: { color: appearances[column.id]?.color ?? palette[index % palette.length], width: 1.4 } },
+        axisLabel: {
+          color: appearances[column.id]?.color ?? palette[index % palette.length],
+          fontSize: 13,
+          fontWeight: 500,
+          margin: 10,
+          // Boolean panels only ever plot 0/1, but the auto-generated ticks
+          // land on fractions like 0.2/0.4 too; label only the two ticks
+          // that sit on an actual value and leave the rest blank, so the
+          // axis reads false/true the same way the table does.
+          formatter: isBoolean
+            ? (value: number) => (Math.abs(value) < 0.01 ? 'false' : Math.abs(value - 1) < 0.01 ? 'true' : '')
+            : undefined,
+        },
+        splitLine: { lineStyle: { color: '#dce3e5', width: 1.2 } },
+      };
+    }),
     dataZoom: [
       { id: 'x-wheel-zoom', type: 'inside', xAxisIndex: grids.map((_, index) => index), filterMode: 'none', zoomOnMouseWheel: true, moveOnMouseWheel: false },
       { type: 'slider', xAxisIndex: grids.map((_, index) => index), height: 22, bottom: 14 },
