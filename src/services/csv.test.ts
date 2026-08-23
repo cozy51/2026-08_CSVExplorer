@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { inferType, parseCsv } from './csv';
-import { parseWithFormat } from './formatRegistry';
+import { formats, parseWithFormat } from './formatRegistry';
 import { traceInternals } from '../formats/trace';
 
 const yaskawaSample = `[作成日時]
@@ -30,6 +30,15 @@ const traceSample = `,ログ日時,,号機番号,バージョン,
 00:04:09,065,4364,0x01,00000,00000,-00004,0 : --,000,00000,0,
 00:04:09,067,4364,0x01,00000,00001,-00004,0 : --,000,00000,1,
 00:04:10,070,4364,0x01,00000,00002,-00004,0 : --,000,00000,1,`;
+
+// The same log without a msec column: the clock carries the milliseconds.
+const trace2Sample = `,ログ日時,,号機番号,バージョン,
+,20/07/08, 17:21:25,0401,IV32-03W-010AA_20200625,
+,,,位置,,,,,X00,X01,
+時間,アラーム,サブコード,ポイント,走行位置,昇降位置,カーブセンサ,直線車間,反射テープ,N分岐後,
+17:19:31.234,0000,0x00,00704,00012,00000,有効,無効,1,0,
+17:19:31.250,0000,0x00,00704,00013,00000,有効,無効,1,0,
+17:19:31.257,0000,0x00,00704,00014,00000,有効,無効,0,1,`;
 
 describe('CSV parsing', () => {
   it('handles quoted commas and newlines', () => {
@@ -121,6 +130,13 @@ describe('CSV parsing', () => {
       .toEqual(['', '', 'ハンド入力', 'ハンド入力', 'ハンド出力', 'ハンド出力', 'ハンド出力']);
   });
 
+  it('does not carry a PLC address past its own column', () => {
+    expect(traceInternals.expandClassification(['E84', '', 'X00', '', 'Y9f', '', ''], 7))
+      .toEqual(['E84', 'E84', 'X00', '', 'Y9f', '', '']);
+    expect(traceInternals.expandClassification(['X0f～X08', '', '位置', ''], 4))
+      .toEqual(['X0f～X08', '', '位置', '位置']);
+  });
+
   it('spreads the samples evenly over the seconds the log spans', () => {
     const dataset = parseWithFormat({ fileName: 'trc_0001.csv', text: traceSample });
     expect(dataset.metadata.xAxisId).toBe('__elapsed');
@@ -163,6 +179,36 @@ describe('CSV parsing', () => {
       text: '時間,msec,値,\n23:59:59,900,1,\n00:00:00,100,2,',
     });
     expect(dataset.rows.map((row) => row.__elapsed)).toEqual([0, 1]);
+  });
+
+  it('detects the msec-less trace log as its own format', () => {
+    const dataset = parseWithFormat({ fileName: 'trc_0401.csv', text: trace2Sample });
+    expect(dataset.metadata.formatId).toBe('trace2');
+    expect(dataset.metadata.formatName).toBe('Trace CSV 2 (msec無し)');
+    expect(dataset.metadata.details.logTime).toBe('20/07/08 17:21:25');
+    expect(dataset.metadata.details.machineNumber).toBe('0401');
+    expect(dataset.metadata.details.headerRow).toBe(4);
+    expect(dataset.columns.map((column) => column.name)).toContain('位置-走行位置');
+    expect(dataset.columns.map((column) => column.name)).toContain('X00-反射テープ');
+  });
+
+  it('takes the milliseconds straight from the clock when it carries them', () => {
+    const dataset = parseWithFormat({ fileName: 'trc_0401.csv', text: trace2Sample });
+    expect(dataset.metadata.xAxisId).toBe('__elapsed');
+    expect(dataset.metadata.xAxisDisplayUnit).toBe('s');
+    expect(dataset.rows.map((row) => row.__elapsed)).toEqual([0, 0.016, 0.023]);
+    expect(dataset.metadata.details.timeBase).toBe('時間列のミリ秒');
+    expect(dataset.metadata.durationMs).toBe(23);
+  });
+
+  it('keeps the two trace variants apart', () => {
+    const withMsec = { fileName: 'trc_0001.csv', text: traceSample };
+    const withoutMsec = { fileName: 'trc_0401.csv', text: trace2Sample };
+    expect(formats.find((format) => format.id === 'trace')!.detect(withoutMsec)).toBe(0);
+    expect(formats.find((format) => format.id === 'trace2')!.detect(withMsec)).toBe(0);
+    expect(parseWithFormat(withMsec).metadata.formatId).toBe('trace');
+    // A manual pick still parses the other variant's file.
+    expect(parseWithFormat(withoutMsec, 'trace').metadata.formatId).toBe('trace');
   });
 
   it('keeps support for the original trace timestamp format', () => {
