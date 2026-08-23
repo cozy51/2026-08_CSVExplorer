@@ -63,3 +63,45 @@ export function buildYZoomBatch(zoomOptions: AxisZoomRange[] | undefined, axisCo
     return { dataZoomId, ...computeZoomWindow(zoom?.start ?? 0, zoom?.end ?? 100, zoomIn) };
   });
 }
+
+export interface TooltipSeriesParam {
+  seriesIndex: number;
+  seriesName?: string;
+  marker?: string;
+  axisValueLabel?: string;
+  value?: unknown;
+}
+
+const htmlEntities: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, (character) => htmlEntities[character]);
+}
+
+export function formatTooltipValue(value: unknown): string {
+  // Numeric X axes carry [x, y] pairs, category axes carry the bare Y value.
+  const raw = Array.isArray(value) ? value[value.length - 1] : value;
+  if (typeof raw === 'boolean') return raw ? '1' : '0';
+  if (raw === null || raw === undefined || raw === '') return '-';
+  const numeric = Number(raw);
+  if (!Number.isFinite(numeric)) return String(raw);
+  // Same rounding as the X-axis labels: normalizing a series can leave float
+  // noise such as 59.99999999999991 that would otherwise reach the tooltip.
+  return Number(numeric.toPrecision(10)).toLocaleString(undefined, { maximumFractionDigits: 20 });
+}
+
+/**
+ * The linked X axes make ECharts group the tooltip one block per grid, which
+ * floats the Boolean panels above the analog plot and repeats the X value.
+ * Series indexes already follow the visual stack — analog plots first, Boolean
+ * panels last — so re-sorting by them puts Boolean rows back at the bottom
+ * under a single header.
+ */
+export function buildTooltipMarkup(params: TooltipSeriesParam[]): string {
+  if (params.length === 0) return '';
+  const ordered = [...params].sort((left, right) => left.seriesIndex - right.seriesIndex);
+  const rows = ordered.map((param) => '<div style="display:flex;align-items:center;gap:6px">'
+    + `${param.marker ?? ''}<span style="flex:1">${escapeHtml(param.seriesName ?? '')}</span>`
+    + `<b style="font-weight:700;margin-left:24px">${formatTooltipValue(param.value)}</b></div>`);
+  return `<div style="font-weight:600;margin-bottom:4px">${escapeHtml(ordered[0].axisValueLabel ?? '')}</div>${rows.join('')}`;
+}

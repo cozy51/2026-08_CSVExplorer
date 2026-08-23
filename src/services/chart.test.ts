@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildNiceTickIndexes, buildYZoomBatch, computeZoomWindow, wheelZoomAxis } from './chart';
+import { buildNiceTickIndexes, buildTooltipMarkup, buildYZoomBatch, computeZoomWindow, formatTooltipValue, wheelZoomAxis } from './chart';
 
 describe('chart axis labels', () => {
   it('always includes the first and final sample', () => {
@@ -39,5 +39,25 @@ describe('chart axis labels', () => {
 
   it('keeps the Y zoom batch empty when no analog axis is plotted', () => {
     expect(buildYZoomBatch(undefined, 0, true)).toEqual([]);
+  });
+
+  it('lists Boolean panels under the analog series in the tooltip', () => {
+    const markup = buildTooltipMarkup([
+      { seriesIndex: 2, seriesName: '/S-ON(#1)', axisValueLabel: '13.840', value: [13.84, 0] },
+      { seriesIndex: 0, seriesName: 'フィードバック速度(#1)', axisValueLabel: '13.840', value: [13.84, 2249.816895] },
+      { seriesIndex: 1, seriesName: 'トルク指令(#1)', axisValueLabel: '13.840', value: [13.84, -19.719788] },
+    ]);
+    expect(markup.indexOf('フィードバック速度(#1)')).toBeLessThan(markup.indexOf('トルク指令(#1)'));
+    expect(markup.indexOf('トルク指令(#1)')).toBeLessThan(markup.indexOf('/S-ON(#1)'));
+    expect(markup.match(/13\.840/g)).toHaveLength(1);
+  });
+
+  it('keeps the full precision of tooltip values and escapes series names', () => {
+    expect(formatTooltipValue([13.84, 2249.816895])).toBe('2,249.816895');
+    expect(formatTooltipValue([13.84, -19.719788])).toBe('-19.719788');
+    expect(formatTooltipValue([13.84, null])).toBe('-');
+    expect(formatTooltipValue(59.99999999999991)).toBe('60');
+    expect(buildTooltipMarkup([{ seriesIndex: 0, seriesName: '<b>x</b>', axisValueLabel: '1', value: 2 }]))
+      .toContain('&lt;b&gt;x&lt;/b&gt;');
   });
 });
