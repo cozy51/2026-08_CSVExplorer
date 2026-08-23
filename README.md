@@ -51,6 +51,7 @@ Auto は全 adapter の confidence を比較し、最高得点を採用します
 ## 対応機能
 
 - Generic CSV、Trace CSV (`trc_*.csv`)、安川サーボトレースCSVの自動判定・手動再解析
+- UTF-8 / Shift_JIS（Windows-31J）をファイル内容から判定してブラウザ内でデコード
 - 安川形式の作成日時、サーボパック形式、モータ形式、グループ、単位、データ開始行を保持
 - 検索、変化列フィルタ、型推定、複数列選択
 - ECharts の tooltip、凡例、ズーム、パン、復元、画像保存
