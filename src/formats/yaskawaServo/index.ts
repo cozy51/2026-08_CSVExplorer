@@ -89,6 +89,8 @@ function parseYaskawaServo(context: ParseContext, confidence = 0.9): ParsedDatas
       confidence,
       delimiter,
       xAxisId: timeColumn.id,
+      xAxisScale: timeColumn.unit === 'ms' ? 0.001 : 1,
+      xAxisDisplayUnit: timeColumn.unit === 'ms' ? 's' : timeColumn.unit,
       durationMs,
       details: {
         createdAt: sectionValue(lines, '作成日時') ?? '不明',

@@ -45,6 +45,8 @@ describe('CSV parsing', () => {
     expect(dataset.metadata.details.servoPackModel).toBe('SGD7S-2R8A00AY0522A');
     expect(dataset.metadata.details.motorModel).toBe('SGM7J-04AFA6C');
     expect(dataset.metadata.durationMs).toBe(40);
+    expect(dataset.metadata.xAxisScale).toBe(0.001);
+    expect(dataset.metadata.xAxisDisplayUnit).toBe('s');
     expect(dataset.rows).toHaveLength(3);
   });
 

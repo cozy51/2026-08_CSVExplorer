@@ -27,7 +27,16 @@ export function MainChart({ dataset, selected, xAxis, mode }: MainChartProps) {
   const columns = selected
     .map((id) => dataset.columns.find((column) => column.id === id))
     .filter((column): column is ColumnDefinition => Boolean(column));
-  const xValues = dataset.rows.map((row, index) => xAxis === '__index' ? index + 1 : row[xAxis]);
+  const xScale = xAxis === dataset.metadata.xAxisId ? (dataset.metadata.xAxisScale ?? 1) : 1;
+  const xValues = dataset.rows.map((row, index) => {
+    if (xAxis === '__index') return index + 1;
+    const value = row[xAxis];
+    return typeof value === 'number' ? value * xScale : value;
+  });
+  const selectedXAxis = dataset.columns.find((column) => column.id === xAxis);
+  const xAxisName = xAxis === '__index'
+    ? 'Row'
+    : `${selectedXAxis?.name ?? ''}${dataset.metadata.xAxisDisplayUnit ? ` [${dataset.metadata.xAxisDisplayUnit}]` : ''}`;
   const stacked = mode === 'stacked';
   const grids = stacked
     ? columns.map((_, index) => ({
@@ -42,13 +51,22 @@ export function MainChart({ dataset, selected, xAxis, mode }: MainChartProps) {
     animation: false,
     color: palette,
     grid: grids,
-    legend: { top: 10, left: 18, type: 'scroll', textStyle: { color: '#384650' } },
+    textStyle: { fontFamily: 'Inter, Noto Sans JP, sans-serif', fontSize: 14, color: '#263941' },
+    legend: {
+      top: 10,
+      left: 24,
+      type: 'scroll',
+      itemWidth: 24,
+      itemHeight: 12,
+      itemGap: 22,
+      textStyle: { color: '#263941', fontSize: 14 },
+    },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'cross', snap: true },
       backgroundColor: 'rgba(255,255,255,.97)',
       borderColor: '#ccd4d8',
-      textStyle: { color: '#22313a' },
+      textStyle: { color: '#22313a', fontSize: 14, lineHeight: 22 },
     },
     toolbox: {
       right: 18,
@@ -60,10 +78,12 @@ export function MainChart({ dataset, selected, xAxis, mode }: MainChartProps) {
       data: xValues,
       boundaryGap: false,
       name: index === (stacked ? columns.length - 1 : 0)
-        ? (xAxis === '__index' ? 'Row' : dataset.columns.find((column) => column.id === xAxis)?.name)
+        ? xAxisName
         : '',
-      axisLine: { lineStyle: { color: '#8b989e' } },
-      axisLabel: { color: '#66747b', show: !stacked || index === columns.length - 1, hideOverlap: true },
+      nameTextStyle: { fontSize: 14, fontWeight: 600, padding: [10, 0, 0, 0] },
+      axisLine: { lineStyle: { color: '#687b83', width: 1.5 } },
+      axisTick: { lineStyle: { width: 1.5 }, length: 6 },
+      axisLabel: { color: '#455b64', fontSize: 13, margin: 10, show: !stacked || index === columns.length - 1, hideOverlap: true },
       axisPointer: { show: true, snap: true },
     })),
     yAxis: columns.map((column, index) => ({
@@ -71,15 +91,17 @@ export function MainChart({ dataset, selected, xAxis, mode }: MainChartProps) {
       gridIndex: stacked ? index : 0,
       name: stacked ? `${column.name}${column.unit ? ` [${column.unit}]` : ''}` : undefined,
       nameLocation: 'middle',
-      nameGap: stacked ? 48 : 36,
+      nameGap: stacked ? 52 : 40,
+      nameTextStyle: { fontSize: 13, fontWeight: 600 },
       scale: column.type !== 'boolean',
       min: column.type === 'boolean' ? -0.1 : undefined,
       max: column.type === 'boolean' ? 1.1 : undefined,
       position: !stacked && index % 2 ? 'right' : 'left',
       offset: !stacked && index > 1 ? Math.floor(index / 2) * 44 : 0,
-      axisLine: { show: true, lineStyle: { color: palette[index % palette.length] } },
-      axisLabel: { color: palette[index % palette.length] },
-      splitLine: { lineStyle: { color: '#e8ecee' } },
+      axisLine: { show: true, lineStyle: { color: palette[index % palette.length], width: 1.6 } },
+      axisTick: { show: true, lineStyle: { color: palette[index % palette.length], width: 1.4 } },
+      axisLabel: { color: palette[index % palette.length], fontSize: 13, fontWeight: 500, margin: 10 },
+      splitLine: { lineStyle: { color: '#dce3e5', width: 1.2 } },
     })),
     dataZoom: [
       { type: 'inside', xAxisIndex: stacked ? columns.map((_, index) => index) : [0], filterMode: 'none' },
@@ -96,7 +118,7 @@ export function MainChart({ dataset, selected, xAxis, mode }: MainChartProps) {
       }),
       showSymbol: false,
       sampling: 'lttb',
-      lineStyle: { width: 1.5 },
+      lineStyle: { width: 2.2 },
       step: column.type === 'boolean' ? 'end' : false,
       connectNulls: false,
       large: true,
