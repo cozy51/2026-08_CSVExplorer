@@ -1,7 +1,8 @@
 import ReactECharts from 'echarts-for-react';
 import { useEffect, useRef } from 'react';
 import type { ColumnDefinition, ParsedDataset, SeriesAppearance } from '../models/dataset';
-import { buildNiceTickIndexes, computeZoomWindow, wheelZoomAxis } from '../services/chart';
+import { buildNiceTickIndexes, buildYZoomBatch, wheelZoomAxis, yZoomId } from '../services/chart';
+import type { AxisZoomRange } from '../services/chart';
 
 export type ChartMode = 'individual' | 'normalized' | 'stacked';
 
@@ -28,6 +29,7 @@ function normalizedValue(value: number | null, column: ColumnDefinition): number
 
 export function MainChart({ dataset, selected, xAxis, mode, appearances }: MainChartProps) {
   const chartRef = useRef<ReactECharts>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const selectedColumns = selected
     .map((id) => dataset.columns.find((column) => column.id === id))
     .filter((column): column is ColumnDefinition => Boolean(column));
@@ -36,7 +38,9 @@ export function MainChart({ dataset, selected, xAxis, mode, appearances }: MainC
   // The visual stack is the canonical order: analog plots first, Boolean
   // panels last. ECharts uses this same order for legend and tooltip entries.
   const columns = [...analogColumns, ...booleanColumns];
-  const yAxisCount = columns.length;
+  // Boolean panels are pinned to a fixed -0.1..1.1 range, so a dataZoom window
+  // would never move them. Only the analog axes, which lead `columns`, zoom.
+  const zoomableYAxisCount = analogColumns.length;
   const xScale = xAxis === dataset.metadata.xAxisId ? (dataset.metadata.xAxisScale ?? 1) : 1;
   const xValues = dataset.rows.map((row, index) => {
     if (xAxis === '__index') return index + 1;
@@ -87,26 +91,33 @@ export function MainChart({ dataset, selected, xAxis, mode, appearances }: MainC
   const numericXMax = numericXAxis ? numericXValues.reduce((maximum, value) => Math.max(maximum, value), -Infinity) : undefined;
 
   useEffect(() => {
-    const instance = chartRef.current?.getEchartsInstance();
-    const chartElement = instance?.getDom();
-    if (!instance || !chartElement) return;
+    // Our own wrapper is the only element guaranteed to outlive the chart:
+    // echarts-for-react measures the container with a throwaway instance and
+    // then disposes it, and StrictMode remounts the whole subtree once more.
+    // Binding to the instance DOM captured here would leave the listener on a
+    // detached node, which is why Shift+wheel used to fall through to ECharts'
+    // built-in X dataZoom instead of zooming Y.
+    const container = containerRef.current;
+    if (!container) return;
     const handleShiftWheel = (event: WheelEvent) => {
       // Normal wheel events continue to ECharts' built-in X dataZoom. Capture
       // Shift+wheel first so it cannot also reach that X-axis handler.
       if (wheelZoomAxis(event.shiftKey) === 'x') return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      const zoomOptions = instance.getOption().dataZoom as Array<{ id?: string; start?: number; end?: number }> | undefined;
-      for (let index = 0; index < yAxisCount; index += 1) {
-        const dataZoomId = `y-wheel-zoom-${index}`;
-        const zoom = zoomOptions?.find(item => item.id === dataZoomId);
-        const next = computeZoomWindow(zoom?.start ?? 0, zoom?.end ?? 100, event.deltaY < 0);
-        instance.dispatchAction({ type: 'dataZoom', dataZoomId, ...next });
-      }
+      if (zoomableYAxisCount === 0) return;
+      // Resolve the live instance per event for the same reason.
+      const instance = chartRef.current?.getEchartsInstance();
+      const zoomOptions = instance?.getOption()?.dataZoom as AxisZoomRange[] | undefined;
+      if (!instance || !zoomOptions) return;
+      instance.dispatchAction({
+        type: 'dataZoom',
+        batch: buildYZoomBatch(zoomOptions, zoomableYAxisCount, event.deltaY < 0),
+      });
     };
-    chartElement.addEventListener('wheel', handleShiftWheel, { capture: true, passive: false });
-    return () => chartElement.removeEventListener('wheel', handleShiftWheel, { capture: true });
-  }, [yAxisCount]);
+    container.addEventListener('wheel', handleShiftWheel, { capture: true, passive: false });
+    return () => container.removeEventListener('wheel', handleShiftWheel, { capture: true });
+  }, [zoomableYAxisCount]);
 
   const option = {
     animation: false,
@@ -189,7 +200,7 @@ export function MainChart({ dataset, selected, xAxis, mode, appearances }: MainC
       { id: 'x-wheel-zoom', type: 'inside', xAxisIndex: grids.map((_, index) => index), filterMode: 'none', zoomOnMouseWheel: true, moveOnMouseWheel: false },
       { type: 'slider', xAxisIndex: grids.map((_, index) => index), height: 22, bottom: 14 },
       ...columns.map((_, index) => ({
-        id: `y-wheel-zoom-${index}`,
+        id: yZoomId(index),
         type: 'inside',
         yAxisIndex: index,
         filterMode: 'none',
@@ -222,7 +233,7 @@ export function MainChart({ dataset, selected, xAxis, mode, appearances }: MainC
     })),
   };
 
-  return <div className="chart chart-context">
+  return <div className="chart chart-context" ref={containerRef}>
     <ReactECharts ref={chartRef} option={option} notMerge style={{ height: '100%', width: '100%' }} />
     <span className="zoom-help">ホイール: X軸ズーム · Shift＋ホイール: Y軸ズーム</span>
   </div>;
