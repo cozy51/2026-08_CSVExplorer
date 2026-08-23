@@ -145,8 +145,16 @@ describe('CSV parsing', () => {
     });
     const elapsed = dataset.rows.map((row) => Number(row.__elapsed));
     expect(elapsed[0]).toBe(0);
-    expect(elapsed.at(-1)).toBe(30);
+    // 10 ms period: the axis reads 0.01, 0.02 … 29.99 rather than 0.0100033….
+    expect(elapsed.slice(1, 4)).toEqual([0.01, 0.02, 0.03]);
+    expect(elapsed.at(-1)).toBe(29.99);
     expect(dataset.metadata.details.sampleIntervalMs).toBeCloseTo(10, 2);
+  });
+
+  it('snaps a measured period onto the recorder\'s round sample rate', () => {
+    expect(traceInternals.tidyPeriod(10.003334)).toBe(10);
+    expect(traceInternals.tidyPeriod(19.98)).toBe(20);
+    expect(traceInternals.tidyPeriod(33.3667)).toBe(33.4);
   });
 
   it('keeps the elapsed time rising when the log clock passes midnight', () => {

@@ -13,6 +13,8 @@ const DAY_MS = 86_400_000;
 const TIME_NAME = /^(時間|時刻|time)$/i;
 const MSEC_NAME = /^(msec|ミリ秒|millisecond)$/i;
 const CLOCK = /^(\d{1,3}):(\d{2}):(\d{2})(?:[.,](\d{1,3}))?$/;
+/** Recorders sample on a round period; the measured one only has to pick it out. */
+const SAMPLE_PERIODS_MS = [0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 4, 5, 8, 10, 16, 20, 25, 32, 40, 50, 64, 100, 125, 200, 250, 500, 1000, 2000, 5000];
 
 /**
  * Trace CSV layout (a recording of roughly 30 seconds):
@@ -112,14 +114,23 @@ function elapsedSeconds(rawRows: string[][], timeIndex: number, msecIndex: numbe
   }
 
   const spanMs = stamps.at(-1)! - stamps[0];
-  // Scaling the index before dividing keeps the final sample exactly on the span.
-  if (stamps.length > 1 && spanMs > 0) return stamps.map((_, index) => (index * spanMs) / (stamps.length - 1) / 1000);
+  if (stamps.length > 1 && spanMs > 0) {
+    // Rounding the period keeps the axis readable: 0.01, 0.02, 0.03 … instead of
+    // 0.010003334444814937.
+    const period = tidyPeriod(spanMs / (stamps.length - 1));
+    return stamps.map((_, index) => Number(((index * period) / 1000).toFixed(6)));
+  }
 
   // Too short to measure a period: fall back to the cells themselves.
   return stamps.map((stamp, index) => {
     const millis = msecIndex < 0 ? 0 : Number(rawRows[index][msecIndex] ?? 0);
     return (stamp - stamps[0] + (Number.isFinite(millis) ? millis : 0)) / 1000;
   });
+}
+
+function tidyPeriod(periodMs: number): number {
+  const nice = SAMPLE_PERIODS_MS.find((candidate) => Math.abs(candidate - periodMs) <= candidate * 0.02);
+  return nice ?? Number(periodMs.toPrecision(3));
 }
 
 /** Column titles carry their classification so 状態 or 検出エリア stay distinguishable. */
@@ -252,4 +263,4 @@ export const traceCsvFormat: CsvFormatAdapter = {
   parse: parseTrace,
 };
 
-export const traceInternals = { classifiedNames, expandClassification, readHeadline, timeOfDayMs };
+export const traceInternals = { classifiedNames, tidyPeriod, expandClassification, readHeadline, timeOfDayMs };

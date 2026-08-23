@@ -10,6 +10,8 @@ interface StoredRow {
   row: DataRow;
 }
 
+let connection: Promise<IDBDatabase> | undefined;
+
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DATABASE_NAME, VERSION);
@@ -18,9 +20,24 @@ function openDatabase(): Promise<IDBDatabase> {
         request.result.createObjectStore(STORE_NAME, { keyPath: ['datasetId', 'index'] });
       }
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      request.result.onclose = () => { connection = undefined; };
+      resolve(request.result);
+    };
     request.onerror = () => reject(request.error);
   });
+}
+
+/**
+ * One connection for the whole session: opening the database per read added a
+ * round trip to every scroll step of the Data table.
+ */
+function database(): Promise<IDBDatabase> {
+  connection ??= openDatabase().catch((error: unknown) => {
+    connection = undefined;
+    throw error;
+  });
+  return connection;
 }
 
 function transactionDone(transaction: IDBTransaction): Promise<void> {
@@ -32,14 +49,12 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
 }
 
 export async function replaceDatasetRows(datasetId: string, rows: DataRow[]): Promise<void> {
-  const database = await openDatabase();
-  const transaction = database.transaction(STORE_NAME, 'readwrite');
+  const transaction = (await database()).transaction(STORE_NAME, 'readwrite');
   const store = transaction.objectStore(STORE_NAME);
   const range = IDBKeyRange.bound([datasetId, 0], [datasetId, Number.MAX_SAFE_INTEGER]);
   store.delete(range);
   rows.forEach((row, index) => store.put({ datasetId, index, row } satisfies StoredRow));
   await transactionDone(transaction);
-  database.close();
 }
 
 export async function readDatasetRows(
@@ -47,8 +62,7 @@ export async function readDatasetRows(
   start: number,
   count: number,
 ): Promise<StoredRow[]> {
-  const database = await openDatabase();
-  const transaction = database.transaction(STORE_NAME, 'readonly');
+  const transaction = (await database()).transaction(STORE_NAME, 'readonly');
   const store = transaction.objectStore(STORE_NAME);
   const range = IDBKeyRange.bound(
     [datasetId, start],
@@ -60,6 +74,5 @@ export async function readDatasetRows(
     request.onerror = () => reject(request.error);
   });
   await transactionDone(transaction);
-  database.close();
   return result;
 }

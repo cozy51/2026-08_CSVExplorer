@@ -11,3 +11,14 @@ body{font-size:15px}.brand h1{font-size:21px}.brand p{font-size:12px;color:#6175
 .data-jump{display:flex;align-items:center;gap:7px;margin-left:auto}.data-jump label{font-weight:600;color:#405861}.data-jump select{min-width:150px;padding:6px 28px 6px 9px;border:1px solid #b8c6ca;background:#fff;color:#314952;font:13px IBM Plex Mono}.data-jump output{min-width:180px;color:#176b87}.virtual-table .jump-target td{background:#e3f2f5;border-top:2px solid #176b87;border-bottom:2px solid #176b87}
 .virtual-table td.boolean-true{background:#fbe8e6;color:#853b35}.virtual-table td.boolean-false{background:#e8f2fa;color:#315d7a}.virtual-table tr:hover td.boolean-true{background:#f7d9d5}.virtual-table tr:hover td.boolean-false{background:#dbeaf6}
 .virtual-table th.x-axis-column,.virtual-table td.x-axis-column{background:#fff0b8;color:#634b00;border-left:2px solid #d8a400;border-right:2px solid #d8a400;font-weight:600}.virtual-table th.x-axis-column{box-shadow:inset 0 3px #d8a400}.virtual-table th.unchanged-column,.virtual-table td.unchanged-column{background:#eef1f2;color:#7b8589}.virtual-table tr:hover td.unchanged-column{background:#e5e9ea}.virtual-table tr:hover td.x-axis-column{background:#ffe68a;color:#4d3a00}
+
+/* Data table: a steady virtual scroller — fixed geometry, no anchoring, no reflow. */
+.table-scroll{overscroll-behavior:contain;overflow-anchor:none;scrollbar-gutter:stable}
+.table-scroll table{table-layout:fixed}
+.table-scroll td{overflow:hidden;text-overflow:ellipsis}
+.table-scroll th{overflow:hidden;text-overflow:ellipsis;z-index:1}
+.table-scroll tr.spacer td,.table-scroll .column-gap{padding:0;border:0;background:transparent}
+.table-scroll td.row-index,.table-scroll th.row-index{color:#7b898f;text-align:right;position:sticky;left:0;background:#f5f7f7;z-index:2}
+.table-scroll th.row-index{z-index:3}
+.table-scroll tbody tr[data-row]{height:38px}
+.table-scroll tbody tr.spacer{height:0}
