@@ -26,3 +26,13 @@ export function buildNiceTickIndexes(values: unknown[], targetTicks = 8): Set<nu
   }
   return indexes;
 }
+
+export function computeZoomWindow(start: number, end: number, zoomIn: boolean) {
+  const center = (start + end) / 2;
+  const nextRange = Math.min(100, Math.max(0.5, (end - start) * (zoomIn ? 0.8 : 1.25)));
+  let nextStart = center - nextRange / 2;
+  let nextEnd = center + nextRange / 2;
+  if (nextStart < 0) { nextEnd -= nextStart; nextStart = 0; }
+  if (nextEnd > 100) { nextStart -= nextEnd - 100; nextEnd = 100; }
+  return { start: Math.max(0, nextStart), end: Math.min(100, nextEnd) };
+}

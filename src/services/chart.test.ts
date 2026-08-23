@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildNiceTickIndexes } from './chart';
+import { buildNiceTickIndexes, computeZoomWindow } from './chart';
 
 describe('chart axis labels', () => {
   it('always includes the first and final sample', () => {
@@ -14,5 +14,10 @@ describe('chart axis labels', () => {
     const labels = [...buildNiceTickIndexes(values, 20)].map((index) => values[index]);
     expect(labels).toEqual(expect.arrayContaining([0, 1, 2, 10, 19, 20, 20.46]));
     expect(labels.length).toBeGreaterThanOrEqual(21);
+  });
+
+  it('zooms only the requested percentage window', () => {
+    expect(computeZoomWindow(0, 100, true)).toEqual({ start: 10, end: 90 });
+    expect(computeZoomWindow(10, 90, false)).toEqual({ start: 0, end: 100 });
   });
 });
