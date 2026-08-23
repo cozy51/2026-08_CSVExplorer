@@ -50,10 +50,12 @@ Auto は全 adapter の confidence を比較し、最高得点を採用します
 
 ## 対応機能
 
-- Generic CSV と Trace CSV (`trc_*.csv`) の自動判定・手動再解析
+- Generic CSV、Trace CSV (`trc_*.csv`)、安川サーボトレースCSVの自動判定・手動再解析
+- 安川形式の作成日時、サーボパック形式、モータ形式、グループ、単位、データ開始行を保持
 - 検索、変化列フィルタ、型推定、複数列選択
 - ECharts の tooltip、凡例、ズーム、パン、復元、画像保存
-- Boolean の step 波形、時刻候補または行番号の X 軸
+- I/Oグループの0/1列をBooleanとして認識するstep波形、時刻候補または行番号の X 軸
+- 個別Y軸、正規化、同期した段組み表示
 - ページングされた Data 表
 
 ## 大きなファイル
