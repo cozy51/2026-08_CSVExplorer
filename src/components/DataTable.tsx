@@ -89,7 +89,9 @@ export function DataTable({ columns, rowCount, storeKey, xAxisId, xAxisName, jum
     className: column.id === xAxisId
       ? 'x-axis-column'
       : column.stats.changes === 0 ? 'unchanged-column' : '',
-    width: columnWidth(column.name),
+    // The header now carries a type badge (NUMBER/BOOLEAN/...) beside the
+    // name, so size the column to fit both instead of the name alone.
+    width: columnWidth(`${column.name} ${column.type}`),
   })), [columns, xAxisId]);
   // Left edge of every column, so the horizontal window is a lookup, not a measure.
   const offsets = useMemo(() => plan.reduce(
@@ -232,7 +234,12 @@ export function DataTable({ columns, rowCount, storeKey, xAxisId, xAxisName, jum
             className={plan[firstColumn + index].className}
             key={column.id}
             title={column.name}
-          >{column.name}</th>)}
+          >
+            <div className="column-header">
+              <span className="column-header-name">{column.name}</span>
+              <span className="type">{column.type}</span>
+            </div>
+          </th>)}
           {lastColumn < plan.length && <th className="column-gap" colSpan={plan.length - lastColumn} />}
         </tr></thead>
         <tbody ref={bodyRef}>
