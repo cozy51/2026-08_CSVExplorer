@@ -87,11 +87,12 @@ function timeOfDayMs(value: string): number | undefined {
 }
 
 /**
- * 時間 and msec are two columns, so the X axis has to be synthesized. Values are
- * elapsed milliseconds from the first sample, which keeps a recording that
- * starts at 00:04:09 readable and survives a run that crosses midnight.
+ * The recorder's clock drifts, and msec counts scans rather than milliseconds of
+ * the current second, so neither cell locates a sample precisely. The seconds in
+ * 時間 are trustworthy in aggregate — a 3,000 row file spans exactly 30 s — so
+ * the samples are spread evenly over that span instead.
  */
-function elapsedMilliseconds(rawRows: string[][], timeIndex: number, msecIndex: number): number[] | undefined {
+function elapsedSeconds(rawRows: string[][], timeIndex: number, msecIndex: number): number[] | undefined {
   if (timeIndex < 0) return undefined;
   const wraps = CLOCK.test((rawRows[0]?.[timeIndex] ?? '').trim());
   const stamps: number[] = [];
@@ -99,16 +100,35 @@ function elapsedMilliseconds(rawRows: string[][], timeIndex: number, msecIndex: 
   let previous: number | undefined;
 
   for (const row of rawRows) {
-    const base = timeOfDayMs(row[timeIndex] ?? '');
-    if (base === undefined) return undefined;
-    const millis = msecIndex < 0 ? 0 : Number(row[msecIndex] ?? 0);
-    let stamp = base + (Number.isFinite(millis) ? millis : 0);
-    if (wraps && previous !== undefined && stamp + offset < previous) offset += DAY_MS;
-    stamp += offset;
+    const clock = timeOfDayMs(row[timeIndex] ?? '');
+    if (clock === undefined) return undefined;
+    let stamp = clock + offset;
+    if (wraps && previous !== undefined && stamp < previous) {
+      offset += DAY_MS;
+      stamp += DAY_MS;
+    }
     previous = stamp;
     stamps.push(stamp);
   }
-  return stamps.map((stamp) => stamp - stamps[0]);
+
+  const spanMs = stamps.at(-1)! - stamps[0];
+  // Scaling the index before dividing keeps the final sample exactly on the span.
+  if (stamps.length > 1 && spanMs > 0) return stamps.map((_, index) => (index * spanMs) / (stamps.length - 1) / 1000);
+
+  // Too short to measure a period: fall back to the cells themselves.
+  return stamps.map((stamp, index) => {
+    const millis = msecIndex < 0 ? 0 : Number(rawRows[index][msecIndex] ?? 0);
+    return (stamp - stamps[0] + (Number.isFinite(millis) ? millis : 0)) / 1000;
+  });
+}
+
+/** Column titles carry their classification so 状態 or 検出エリア stay distinguishable. */
+function classifiedNames(names: string[], classification: string[]): string[] {
+  return names.map((name, index) => {
+    const title = name.trim() || `Column ${index + 1}`;
+    const block = classification[index];
+    return block && block !== title ? `${block}-${title}` : title;
+  });
 }
 
 function numericStats(values: number[]): ColumnStats {
@@ -171,12 +191,12 @@ function parseTrace(context: ParseContext, confidence = 0.8): ParsedDataset {
   const samples = rawRows.map((row) => row.slice(0, width));
   const classification = expandClassification(matrix[classificationIndex], width);
 
-  const columns: ColumnDefinition[] = defineColumns(names, samples, classification);
+  const columns: ColumnDefinition[] = defineColumns(classifiedNames(names, classification), samples, classification);
   let rows: DataRow[] = toRows(samples, columns);
 
   const timeIndex = names.findIndex((name) => TIME_NAME.test(name.trim()));
   const msecIndex = names.findIndex((name) => MSEC_NAME.test(name.trim()));
-  const elapsed = elapsedMilliseconds(samples, timeIndex, msecIndex);
+  const elapsed = elapsedSeconds(samples, timeIndex, msecIndex);
 
   let xAxis = timeIndex >= 0 ? columns[timeIndex] : undefined;
   let durationMs: number | undefined;
@@ -186,14 +206,14 @@ function parseTrace(context: ParseContext, confidence = 0.8): ParsedDataset {
       id: '__elapsed',
       name: '経過時間',
       group: 'Time',
-      unit: 'ms',
+      unit: 's',
       type: 'number',
       stats: numericStats(elapsed),
     };
     columns.unshift(derived);
     rows = rows.map((row, index) => ({ ...row, [derived.id]: elapsed[index] as CellValue }));
     xAxis = derived;
-    durationMs = elapsed.at(-1)! - elapsed[0];
+    durationMs = (elapsed.at(-1)! - elapsed[0]) * 1000;
   }
 
   return {
@@ -204,7 +224,7 @@ function parseTrace(context: ParseContext, confidence = 0.8): ParsedDataset {
       confidence,
       delimiter,
       xAxisId: xAxis?.id,
-      xAxisScale: elapsed ? 0.001 : undefined,
+      xAxisScale: 1,
       xAxisDisplayUnit: elapsed ? 's' : undefined,
       durationMs,
       details: {
@@ -212,6 +232,9 @@ function parseTrace(context: ParseContext, confidence = 0.8): ParsedDataset {
         machineNumber: headline['号機番号'] ?? '不明',
         version: headline['バージョン'] ?? '不明',
         startTime: (samples[0]?.[timeIndex] ?? '').trim() || '不明',
+        sampleIntervalMs: elapsed && elapsed.length > 1
+          ? Number(((elapsed[1] - elapsed[0]) * 1000).toFixed(3))
+          : 'なし',
         classificationRow: classificationIndex >= 0 ? classificationIndex + 1 : 'なし',
         headerRow: headerIndex + 1,
         dataStartRow: headerIndex + 2,
@@ -229,4 +252,4 @@ export const traceCsvFormat: CsvFormatAdapter = {
   parse: parseTrace,
 };
 
-export const traceInternals = { expandClassification, readHeadline, timeOfDayMs };
+export const traceInternals = { classifiedNames, expandClassification, readHeadline, timeOfDayMs };
