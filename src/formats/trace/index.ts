@@ -16,7 +16,10 @@ const CLOCK = /^(\d{1,3}):(\d{2}):(\d{2})(?:[.,](\d{1,3}))?$/;
 /** A PLC address such as X00, Y9f or X0f～X08 labels its own column, nothing after it. */
 const BIT_ADDRESS = /^[XY][0-9a-f]{2,3}(?:\s*[～~-]\s*[XY]?[0-9a-f]{2,3})?$/i;
 /** Recorders sample on a round period; the measured one only has to pick it out. */
-const SAMPLE_PERIODS_MS = [0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 4, 5, 8, 10, 16, 20, 25, 32, 40, 50, 64, 100, 125, 200, 250, 500, 1000, 2000, 5000];
+const SAMPLE_PERIODS_MS = [
+  0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 4, 5, 8, 10, 12.5, 16, 16.7, 20, 25, 32, 33.3, 40, 50, 64,
+  100, 125, 200, 250, 500, 1000, 2000, 5000,
+];
 
 interface TraceVariant { id: string; name: string; msec: boolean }
 
@@ -38,8 +41,7 @@ interface TraceVariant { id: string; name: string; msec: boolean }
 const TRACE: TraceVariant = { id: 'trace', name: 'Trace CSV (trc)', msec: true };
 const TRACE_2: TraceVariant = { id: 'trace2', name: 'Trace CSV 2 (msec無し)', msec: false };
 const TIME_BASE_LABELS = {
-  clock: '時間列のミリ秒',
-  uniform: '時間列の秒差を行数で等分',
+  uniform: '推定したサンプル周期で等間隔',
   cells: '時間列とmsec',
 } as const;
 /**
@@ -122,23 +124,22 @@ function timeOfDayMs(value: string): number | undefined {
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
-type TimeBase = 'clock' | 'uniform' | 'cells';
+type TimeBase = 'uniform' | 'cells';
 
 /**
- * The recorder's clock drifts, and msec counts scans rather than milliseconds of
- * the current second, so in that variant neither cell locates a sample: the
- * seconds in 時間 are trustworthy in aggregate — a 3,000 row file spans exactly
- * 30 s — so the samples are spread evenly over that span. When the clock itself
- * carries milliseconds (17:19:31.234) it is precise enough to use as it stands.
+ * The recorder's clock is not dependable per sample: in one variant it only
+ * counts seconds and msec counts scans, in the other the clock quantizes to the
+ * host timer (16, 7, 8, 8 … ms for a 10 ms recording) and can jump when the log
+ * pauses. What is dependable is the sample period, so the samples are laid out
+ * evenly on it — 3,000 rows at 10 ms read 0, 0.01, 0.02 … 29.99 s.
  */
 function elapsedSeconds(
   rawRows: string[][],
   timeIndex: number,
   msecIndex: number,
-): { values: number[]; base: TimeBase } | undefined {
+): { values: number[]; base: TimeBase; periodMs: number; clockSpanMs: number } | undefined {
   if (timeIndex < 0) return undefined;
-  const opening = CLOCK.exec((rawRows[0]?.[timeIndex] ?? '').trim());
-  const wraps = Boolean(opening);
+  const wraps = CLOCK.test((rawRows[0]?.[timeIndex] ?? '').trim());
   const stamps: number[] = [];
   let offset = 0;
   let previous: number | undefined;
@@ -155,31 +156,51 @@ function elapsedSeconds(
     stamps.push(stamp);
   }
 
-  if (opening?.[4]) {
-    return { values: stamps.map((stamp) => Number(((stamp - stamps[0]) / 1000).toFixed(3))), base: 'clock' };
+  const clockSpanMs = stamps.at(-1)! - stamps[0];
+  const period = tidyPeriod(estimatePeriodMs(stamps));
+  if (period > 0) {
+    return {
+      values: stamps.map((_, index) => Number(((index * period) / 1000).toFixed(6))),
+      base: 'uniform',
+      periodMs: period,
+      clockSpanMs,
+    };
   }
 
-  const spanMs = stamps.at(-1)! - stamps[0];
-  if (stamps.length > 1 && spanMs > 0) {
-    // Rounding the period keeps the axis readable: 0.01, 0.02, 0.03 … instead of
-    // 0.010003334444814937.
-    const period = tidyPeriod(spanMs / (stamps.length - 1));
-    return { values: stamps.map((_, index) => Number(((index * period) / 1000).toFixed(6))), base: 'uniform' };
-  }
-
-  // Too short to measure a period: fall back to the cells themselves.
+  // No usable clock movement: fall back to the cells themselves.
   return {
     values: stamps.map((stamp, index) => {
       const millis = msecIndex < 0 ? 0 : Number(rawRows[index][msecIndex] ?? 0);
       return (stamp - stamps[0] + (Number.isFinite(millis) ? millis : 0)) / 1000;
     }),
     base: 'cells',
+    periodMs: 0,
+    clockSpanMs,
   };
 }
 
+/**
+ * The average step between samples, with pauses and clock jumps left out so
+ * they cannot stretch the period. A clock that only ticks once a second gives
+ * one long step per second, which averages back to the same period.
+ */
+function estimatePeriodMs(stamps: number[]): number {
+  if (stamps.length < 2) return 0;
+  const steps = stamps.slice(1).map((stamp, index) => stamp - stamps[index]);
+  const ticking = steps.filter((step) => step > 0).sort((left, right) => left - right);
+  if (ticking.length === 0) return 0;
+  const median = ticking[Math.floor(ticking.length / 2)];
+  const steady = steps.filter((step) => step >= 0 && step <= median * 4);
+  return steady.length ? steady.reduce((total, step) => total + step, 0) / steady.length : median;
+}
+
+/** Recorders sample on a round period, so the estimate is snapped to the nearest one. */
 function tidyPeriod(periodMs: number): number {
-  const nice = SAMPLE_PERIODS_MS.find((candidate) => Math.abs(candidate - periodMs) <= candidate * 0.02);
-  return nice ?? Number(periodMs.toPrecision(3));
+  if (!(periodMs > 0)) return 0;
+  const nearest = SAMPLE_PERIODS_MS
+    .filter((candidate) => Math.abs(candidate - periodMs) <= candidate * 0.05)
+    .sort((left, right) => Math.abs(left - periodMs) - Math.abs(right - periodMs))[0];
+  return nearest ?? Number(periodMs.toPrecision(3));
 }
 
 /** Column titles carry their classification so 状態 or 検出エリア stay distinguishable. */
@@ -285,8 +306,6 @@ function parseTrace(context: ParseContext, confidence: number, variant: TraceVar
     durationMs = (elapsed.values.at(-1)! - elapsed.values[0]) * 1000;
   }
 
-  const intervals = elapsed && elapsed.values.length > 1 ? elapsed.values.length - 1 : 0;
-
   return {
     metadata: {
       fileName: context.fileName,
@@ -304,9 +323,8 @@ function parseTrace(context: ParseContext, confidence: number, variant: TraceVar
         version: headline['バージョン'] ?? '不明',
         startTime: (samples[0]?.[timeIndex] ?? '').trim() || '不明',
         timeBase: elapsed ? TIME_BASE_LABELS[elapsed.base] : 'なし',
-        sampleIntervalMs: intervals
-          ? Number((durationMs! / intervals).toFixed(3))
-          : 'なし',
+        sampleIntervalMs: elapsed?.periodMs ? elapsed.periodMs : 'なし',
+        clockSpanSec: elapsed ? Number((elapsed.clockSpanMs / 1000).toFixed(3)) : 'なし',
         classificationRow: classificationIndex >= 0 ? classificationIndex + 1 : 'なし',
         headerRow: headerIndex + 1,
         dataStartRow: headerIndex + 2,
@@ -331,4 +349,4 @@ export const traceCsv2Format: CsvFormatAdapter = {
   parse: (context, confidence = 0.8) => parseTrace(context, confidence, TRACE_2),
 };
 
-export const traceInternals = { classifiedNames, tidyPeriod, expandClassification, readHeadline, timeOfDayMs };
+export const traceInternals = { classifiedNames, estimatePeriodMs, tidyPeriod, expandClassification, readHeadline, timeOfDayMs };

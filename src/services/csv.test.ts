@@ -38,7 +38,9 @@ const trace2Sample = `,ログ日時,,号機番号,バージョン,
 時間,アラーム,サブコード,ポイント,走行位置,昇降位置,カーブセンサ,直線車間,反射テープ,N分岐後,
 17:19:31.234,0000,0x00,00704,00012,00000,有効,無効,1,0,
 17:19:31.250,0000,0x00,00704,00013,00000,有効,無効,1,0,
-17:19:31.257,0000,0x00,00704,00014,00000,有効,無効,0,1,`;
+17:19:31.257,0000,0x00,00704,00014,00000,有効,無効,0,1,
+17:19:31.265,0000,0x00,00704,00015,00000,有効,無効,0,1,
+17:19:31.273,0000,0x00,00704,00016,00000,有効,無効,0,1,`;
 
 describe('CSV parsing', () => {
   it('handles quoted commas and newlines', () => {
@@ -170,7 +172,9 @@ describe('CSV parsing', () => {
   it('snaps a measured period onto the recorder\'s round sample rate', () => {
     expect(traceInternals.tidyPeriod(10.003334)).toBe(10);
     expect(traceInternals.tidyPeriod(19.98)).toBe(20);
-    expect(traceInternals.tidyPeriod(33.3667)).toBe(33.4);
+    expect(traceInternals.tidyPeriod(33.3667)).toBe(33.3);
+    expect(traceInternals.tidyPeriod(9.75)).toBe(10);
+    expect(traceInternals.tidyPeriod(7.3)).toBe(7.3);
   });
 
   it('keeps the elapsed time rising when the log clock passes midnight', () => {
@@ -192,13 +196,26 @@ describe('CSV parsing', () => {
     expect(dataset.columns.map((column) => column.name)).toContain('X00-反射テープ');
   });
 
-  it('takes the milliseconds straight from the clock when it carries them', () => {
+  it('lays the msec-less samples out on their own period, like the other variant', () => {
     const dataset = parseWithFormat({ fileName: 'trc_0401.csv', text: trace2Sample });
     expect(dataset.metadata.xAxisId).toBe('__elapsed');
     expect(dataset.metadata.xAxisDisplayUnit).toBe('s');
-    expect(dataset.rows.map((row) => row.__elapsed)).toEqual([0, 0.016, 0.023]);
-    expect(dataset.metadata.details.timeBase).toBe('時間列のミリ秒');
-    expect(dataset.metadata.durationMs).toBe(23);
+    // The clock quantizes a 10 ms recording to 16, 7, 8, 8 ms steps.
+    expect(dataset.rows.map((row) => row.__elapsed)).toEqual([0, 0.01, 0.02, 0.03, 0.04]);
+    expect(dataset.metadata.details.sampleIntervalMs).toBe(10);
+    expect(dataset.metadata.details.clockSpanSec).toBe(0.039);
+    expect(dataset.metadata.details.timeBase).toBe('推定したサンプル周期で等間隔');
+    expect(dataset.metadata.durationMs).toBe(40);
+  });
+
+  it('estimates the period from the steady steps, ignoring pauses', () => {
+    const steps = [0, 16, 23, 31, 39, 55, 62, 70, 78, 94];
+    expect(traceInternals.estimatePeriodMs(steps)).toBeCloseTo(10.4, 1);
+    // A pause in the middle of the log must not stretch the period.
+    expect(traceInternals.estimatePeriodMs([0, 10, 20, 75_000, 75_010, 75_020])).toBe(10);
+    // A clock that only ticks once a second still averages back to the period.
+    expect(traceInternals.estimatePeriodMs([0, 0, 0, 0, 1000, 1000, 1000, 1000, 2000])).toBe(250);
+    expect(traceInternals.estimatePeriodMs([5])).toBe(0);
   });
 
   it('keeps the two trace variants apart', () => {
