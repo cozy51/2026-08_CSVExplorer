@@ -89,9 +89,9 @@ export function DataTable({ columns, rowCount, storeKey, xAxisId, xAxisName, jum
     className: column.id === xAxisId
       ? 'x-axis-column'
       : column.stats.changes === 0 ? 'unchanged-column' : '',
-    // The header now carries a type badge (NUMBER/BOOLEAN/...) beside the
-    // name, so size the column to fit both instead of the name alone.
-    width: columnWidth(`${column.name} ${column.type}`),
+    // The header shows the type badge (NUMBER/BOOLEAN/...) on its own line
+    // under the name, so the column only needs to fit the wider of the two.
+    width: Math.max(columnWidth(column.name), columnWidth(column.type)),
   })), [columns, xAxisId]);
   // Left edge of every column, so the horizontal window is a lookup, not a measure.
   const offsets = useMemo(() => plan.reduce(
