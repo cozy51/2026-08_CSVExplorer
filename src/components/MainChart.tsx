@@ -1,7 +1,7 @@
 import ReactECharts from 'echarts-for-react';
 import { useEffect, useRef } from 'react';
 import type { ColumnDefinition, ParsedDataset, SeriesAppearance } from '../models/dataset';
-import { buildNiceTickIndexes, computeZoomWindow } from '../services/chart';
+import { buildNiceTickIndexes, computeZoomWindow, wheelZoomAxis } from '../services/chart';
 
 export type ChartMode = 'individual' | 'normalized' | 'stacked';
 
@@ -11,11 +11,6 @@ interface MainChartProps {
   xAxis: string;
   mode: ChartMode;
   appearances: Record<string, SeriesAppearance>;
-}
-
-interface ZrWheelEvent {
-  wheelDelta?: number;
-  event?: { deltaY?: number; shiftKey?: boolean; preventDefault(): void; stopPropagation?(): void };
 }
 
 const palette = ['#176b87', '#d97738', '#557a46', '#8a5b9d', '#b4443e', '#2874a6'];
@@ -32,11 +27,7 @@ function normalizedValue(value: number | null, column: ColumnDefinition): number
 }
 
 export function MainChart({ dataset, selected, xAxis, mode, appearances }: MainChartProps) {
-  const chartRef = useRef<{ getEchartsInstance(): {
-    dispatchAction(action: object): void;
-    getOption(): { dataZoom?: Array<{ id?: string; start?: number; end?: number }> };
-    getZr(): { on(name: string, handler: (event: ZrWheelEvent) => void): void; off(name: string, handler: (event: ZrWheelEvent) => void): void };
-  } }>(null);
+  const chartRef = useRef<ReactECharts>(null);
   const columns = selected
     .map((id) => dataset.columns.find((column) => column.id === id))
     .filter((column): column is ColumnDefinition => Boolean(column));
@@ -93,20 +84,21 @@ export function MainChart({ dataset, selected, xAxis, mode, appearances }: MainC
 
   useEffect(() => {
     const instance = chartRef.current?.getEchartsInstance();
-    const renderer = instance?.getZr();
-    if (!instance || !renderer) return;
-    const handleWheel = (event: ZrWheelEvent) => {
-      event.event?.preventDefault();
-      event.event?.stopPropagation?.();
-      const shiftPressed = Boolean(event.event?.shiftKey);
-      const dataZoomId = shiftPressed ? 'y-wheel-zoom' : 'x-wheel-zoom';
-      const zoom = instance.getOption().dataZoom?.find(item => item.id === dataZoomId);
-      const delta = event.wheelDelta ?? -(event.event?.deltaY ?? 0);
-      const next = computeZoomWindow(zoom?.start ?? 0, zoom?.end ?? 100, delta > 0);
-      instance.dispatchAction({ type: 'dataZoom', dataZoomId, ...next });
+    const chartElement = instance?.getDom();
+    if (!instance || !chartElement) return;
+    const handleShiftWheel = (event: WheelEvent) => {
+      // Normal wheel events continue to ECharts' built-in X dataZoom. Capture
+      // Shift+wheel first so it cannot also reach that X-axis handler.
+      if (wheelZoomAxis(event.shiftKey) === 'x') return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const zoom = (instance.getOption().dataZoom as Array<{ id?: string; start?: number; end?: number }> | undefined)
+        ?.find(item => item.id === 'y-wheel-zoom');
+      const next = computeZoomWindow(zoom?.start ?? 0, zoom?.end ?? 100, event.deltaY < 0);
+      instance.dispatchAction({ type: 'dataZoom', dataZoomId: 'y-wheel-zoom', ...next });
     };
-    renderer.on('mousewheel', handleWheel);
-    return () => renderer.off('mousewheel', handleWheel);
+    chartElement.addEventListener('wheel', handleShiftWheel, { capture: true, passive: false });
+    return () => chartElement.removeEventListener('wheel', handleShiftWheel, { capture: true });
   }, []);
 
   const option = {
@@ -186,7 +178,7 @@ export function MainChart({ dataset, selected, xAxis, mode, appearances }: MainC
       splitLine: { lineStyle: { color: '#dce3e5', width: 1.2 } },
     })),
     dataZoom: [
-      { id: 'x-wheel-zoom', type: 'inside', xAxisIndex: grids.map((_, index) => index), filterMode: 'none', zoomOnMouseWheel: false, moveOnMouseWheel: false },
+      { id: 'x-wheel-zoom', type: 'inside', xAxisIndex: grids.map((_, index) => index), filterMode: 'none', zoomOnMouseWheel: true, moveOnMouseWheel: false },
       { type: 'slider', xAxisIndex: grids.map((_, index) => index), height: 22, bottom: 14 },
       {
         id: 'y-wheel-zoom',

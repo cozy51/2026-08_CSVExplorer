@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildNiceTickIndexes, computeZoomWindow } from './chart';
+import { buildNiceTickIndexes, computeZoomWindow, wheelZoomAxis } from './chart';
 
 describe('chart axis labels', () => {
   it('always includes the first and final sample', () => {
@@ -19,5 +19,10 @@ describe('chart axis labels', () => {
   it('zooms only the requested percentage window', () => {
     expect(computeZoomWindow(0, 100, true)).toEqual({ start: 10, end: 90 });
     expect(computeZoomWindow(10, 90, false)).toEqual({ start: 0, end: 100 });
+  });
+
+  it('routes normal wheel to X and Shift+wheel to Y', () => {
+    expect(wheelZoomAxis(false)).toBe('x');
+    expect(wheelZoomAxis(true)).toBe('y');
   });
 });

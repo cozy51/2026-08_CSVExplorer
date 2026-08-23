@@ -63,37 +63,3 @@ export async function readDatasetRows(
   database.close();
   return result;
 }
-
-export async function findNearestRowByValue(
-  datasetId: string,
-  rowCount: number,
-  columnId: string,
-  target: number,
-): Promise<StoredRow | undefined> {
-  if (rowCount <= 0) return undefined;
-  const readOne = async (index: number) => (await readDatasetRows(datasetId, index, 1))[0];
-  const first = await readOne(0);
-  const last = await readOne(rowCount - 1);
-  if (!first || !last) return undefined;
-  const firstValue = Number(first.row[columnId]);
-  const lastValue = Number(last.row[columnId]);
-  if (!Number.isFinite(firstValue) || !Number.isFinite(lastValue)) return undefined;
-  const ascending = lastValue >= firstValue;
-  let low = 0;
-  let high = rowCount - 1;
-  while (low <= high) {
-    const middle = Math.floor((low + high) / 2);
-    const record = await readOne(middle);
-    const value = Number(record?.row[columnId]);
-    if (!record || !Number.isFinite(value)) return undefined;
-    if (value === target) return record;
-    if ((ascending && value < target) || (!ascending && value > target)) low = middle + 1;
-    else high = middle - 1;
-  }
-  const candidates = await Promise.all(
-    [...new Set([Math.max(0, high), Math.min(rowCount - 1, low)])].map(readOne),
-  );
-  return candidates.filter((record): record is StoredRow => Boolean(record)).sort((left, right) => (
-    Math.abs(Number(left.row[columnId]) - target) - Math.abs(Number(right.row[columnId]) - target)
-  ))[0];
-}

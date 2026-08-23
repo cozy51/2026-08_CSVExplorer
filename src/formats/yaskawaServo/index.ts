@@ -1,6 +1,5 @@
 import type {
   CellValue,
-  ColumnDefinition,
   CsvFormatAdapter,
   DataRow,
   ParseContext,

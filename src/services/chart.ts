@@ -36,3 +36,7 @@ export function computeZoomWindow(start: number, end: number, zoomIn: boolean) {
   if (nextEnd > 100) { nextStart -= nextEnd - 100; nextEnd = 100; }
   return { start: Math.max(0, nextStart), end: Math.min(100, nextEnd) };
 }
+
+export function wheelZoomAxis(shiftKey: boolean): 'x' | 'y' {
+  return shiftKey ? 'y' : 'x';
+}

@@ -18,8 +18,8 @@ const bools = new Map([['true',true],['false',false],['on',true],['off',false],[
 export function inferType(values: string[], name=''): ColumnType {
   const v=values.map(x=>x.trim()).filter(Boolean); if(!v.length) return 'text';
   if (v.every(x=>/^(?:0|1|true|false|on|off|yes|no)$/i.test(x)) && new Set(v.map(x=>x.toLowerCase())).size<=2) return 'boolean';
-  if(v.every(x=>Number.isFinite(Number(x)))) return 'number';
   if(v.every(x=>/^0x[\da-f]+$/i.test(x))) return 'code';
+  if(v.every(x=>Number.isFinite(Number(x)))) return 'number';
   if(/date|time|timestamp|日時|時刻|時間/i.test(name) && v.filter(x=>!Number.isNaN(Date.parse(x))).length/v.length>.7) return 'datetime';
   if(new Set(v).size<=Math.min(30,Math.max(5,v.length*.2))) return 'category'; return 'text';
 }
