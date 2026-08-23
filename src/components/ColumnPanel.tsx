@@ -8,6 +8,7 @@ interface ColumnPanelProps {
   xAxisId?: string;
   appearances: Record<string, SeriesAppearance>;
   onAppearanceChange: (columnId: string, appearance: SeriesAppearance) => void;
+  onPriorityChange: (columnId: string, priority: number) => void;
 }
 
 const graphable = (type: string) => ['number', 'boolean'].includes(type);
@@ -19,6 +20,7 @@ export function ColumnPanel({
   xAxisId,
   appearances,
   onAppearanceChange,
+  onPriorityChange,
 }: ColumnPanelProps) {
   const [query, setQuery] = useState('');
   const [changing, setChanging] = useState(false);
@@ -43,6 +45,9 @@ export function ColumnPanel({
           <span className="type">{column.type}</span>
         </label>
         {isSelected && appearance && <div className="series-style" aria-label={`${column.name}の表示設定`}>
+          <label className="priority-control" title="Y軸の優先順位"><span>Y軸</span><select aria-label="Y軸の優先順位" value={selected.indexOf(column.id) + 1} onChange={event => onPriorityChange(column.id, Number(event.target.value))}>
+            {selected.map((_, index) => <option value={index + 1} key={index + 1}>{index + 1}</option>)}
+          </select></label>
           <label title="線の色"><input type="color" value={appearance.color} onChange={event => onAppearanceChange(column.id, { ...appearance, color: event.target.value })} /></label>
           <select aria-label="線種" value={appearance.lineType} onChange={event => onAppearanceChange(column.id, { ...appearance, lineType: event.target.value as SeriesAppearance['lineType'] })}>
             <option value="solid">実線</option><option value="dashed">破線</option><option value="dotted">点線</option>

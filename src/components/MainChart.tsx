@@ -1,5 +1,5 @@
 import ReactECharts from 'echarts-for-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ColumnDefinition, ParsedDataset, SeriesAppearance } from '../models/dataset';
 import { buildNiceTickIndexes } from '../services/chart';
 
@@ -12,6 +12,12 @@ interface MainChartProps {
   mode: ChartMode;
   onJumpToRow?: (rowIndex: number) => void;
   appearances: Record<string, SeriesAppearance>;
+}
+
+interface ZrContextEvent {
+  offsetX: number;
+  offsetY: number;
+  event?: { preventDefault(): void };
 }
 
 const palette = ['#176b87', '#d97738', '#557a46', '#8a5b9d', '#b4443e', '#2874a6'];
@@ -28,7 +34,10 @@ function normalizedValue(value: number | null, column: ColumnDefinition): number
 }
 
 export function MainChart({ dataset, selected, xAxis, mode, onJumpToRow, appearances }: MainChartProps) {
-  const chartRef = useRef<{ getEchartsInstance(): { convertFromPixel(finder: object, value: number[]): unknown } }>(null);
+  const chartRef = useRef<{ getEchartsInstance(): {
+    convertFromPixel(finder: object, value: number[]): unknown;
+    getZr(): { on(name: string, handler: (event: ZrContextEvent) => void): void; off(name: string, handler: (event: ZrContextEvent) => void): void };
+  } }>(null);
   const [contextMenu, setContextMenu] = useState<{ left: number; top: number; rowIndex: number }>();
   const columns = selected
     .map((id) => dataset.columns.find((column) => column.id === id))
@@ -83,6 +92,33 @@ export function MainChart({ dataset, selected, xAxis, mode, onJumpToRow, appeara
   const numericXValues = numericXAxis ? xValues as number[] : [];
   const numericXMin = numericXAxis ? numericXValues.reduce((minimum, value) => Math.min(minimum, value), Infinity) : undefined;
   const numericXMax = numericXAxis ? numericXValues.reduce((maximum, value) => Math.max(maximum, value), -Infinity) : undefined;
+
+  useEffect(() => {
+    const instance = chartRef.current?.getEchartsInstance();
+    const renderer = instance?.getZr();
+    if (!instance || !renderer) return;
+    const handleContextMenu = (event: ZrContextEvent) => {
+      event.event?.preventDefault();
+      const converted = instance.convertFromPixel({ xAxisIndex: 0 }, [event.offsetX, event.offsetY]);
+      const rawXValue = Array.isArray(converted) ? converted[0] : converted;
+      let rowIndex: number;
+      if (numericXAxis) {
+        const xValue = Number(rawXValue);
+        if (!Number.isFinite(xValue)) return;
+        rowIndex = 0;
+        for (let index = 1; index < xValues.length; index += 1) {
+          if (Math.abs(Number(xValues[index]) - xValue) < Math.abs(Number(xValues[rowIndex]) - xValue)) rowIndex = index;
+        }
+      } else {
+        rowIndex = xValues.findIndex(value => String(value) === String(rawXValue));
+        if (rowIndex < 0 && typeof rawXValue === 'number') rowIndex = Math.round(rawXValue);
+        if (rowIndex < 0 || rowIndex >= xValues.length) return;
+      }
+      setContextMenu({ left: event.offsetX, top: event.offsetY, rowIndex });
+    };
+    renderer.on('contextmenu', handleContextMenu);
+    return () => renderer.off('contextmenu', handleContextMenu);
+  }, [numericXAxis, xValues]);
 
   const option = {
     animation: false,
@@ -163,6 +199,14 @@ export function MainChart({ dataset, selected, xAxis, mode, onJumpToRow, appeara
     dataZoom: [
       { type: 'inside', xAxisIndex: grids.map((_, index) => index), filterMode: 'none' },
       { type: 'slider', xAxisIndex: grids.map((_, index) => index), height: 22, bottom: 14 },
+      {
+        type: 'inside',
+        yAxisIndex: columns.map((_, index) => index),
+        filterMode: 'none',
+        zoomOnMouseWheel: 'shift',
+        moveOnMouseWheel: false,
+        moveOnMouseMove: false,
+      },
     ],
     series: columns.map((column, index) => ({
       name: column.name,
@@ -188,33 +232,9 @@ export function MainChart({ dataset, selected, xAxis, mode, onJumpToRow, appeara
     })),
   };
 
-  return <div className="chart chart-context" onClick={() => setContextMenu(undefined)} onContextMenu={event => {
-    event.preventDefault();
-    const instance = chartRef.current?.getEchartsInstance();
-    const converted = instance?.convertFromPixel(
-      { xAxisIndex: 0 },
-      [event.nativeEvent.offsetX, event.nativeEvent.offsetY],
-    );
-    const rawXValue = Array.isArray(converted) ? converted[0] : converted;
-    let rowIndex: number;
-    if (numericXAxis) {
-      const xValue = Number(rawXValue);
-      if (!Number.isFinite(xValue)) return;
-      rowIndex = 0;
-      for (let index = 1; index < xValues.length; index += 1) {
-        if (Math.abs(Number(xValues[index]) - xValue) < Math.abs(Number(xValues[rowIndex]) - xValue)) {
-          rowIndex = index;
-        }
-      }
-    } else {
-      rowIndex = xValues.findIndex(value => String(value) === String(rawXValue));
-      if (rowIndex < 0 && typeof rawXValue === 'number') rowIndex = Math.round(rawXValue);
-      if (rowIndex < 0 || rowIndex >= xValues.length) return;
-    }
-    const bounds = event.currentTarget.getBoundingClientRect();
-    setContextMenu({ left: event.clientX - bounds.left, top: event.clientY - bounds.top, rowIndex });
-  }}>
+  return <div className="chart chart-context" onClick={() => setContextMenu(undefined)}>
     <ReactECharts ref={chartRef} option={option} notMerge style={{ height: '100%', width: '100%' }} />
+    <span className="zoom-help">ホイール: X軸ズーム · Shift＋ホイール: Y軸ズーム</span>
     {contextMenu && <div className="chart-menu" style={{ left: contextMenu.left, top: contextMenu.top }} onClick={event => event.stopPropagation()}>
       <small>Row {contextMenu.rowIndex + 1}</small>
       <button onClick={() => onJumpToRow?.(contextMenu.rowIndex)}>Dataでこの行を表示</button>
