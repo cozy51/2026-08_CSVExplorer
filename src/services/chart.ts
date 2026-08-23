@@ -70,6 +70,7 @@ export interface TooltipSeriesParam {
   marker?: string;
   axisValueLabel?: string;
   value?: unknown;
+  isBoolean?: boolean;
 }
 
 const htmlEntities: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -78,10 +79,12 @@ function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (character) => htmlEntities[character]);
 }
 
-export function formatTooltipValue(value: unknown): string {
+export function formatTooltipValue(value: unknown, isBoolean = false): string {
   // Numeric X axes carry [x, y] pairs, category axes carry the bare Y value.
   const raw = Array.isArray(value) ? value[value.length - 1] : value;
-  if (typeof raw === 'boolean') return raw ? '1' : '0';
+  // Boolean series are plotted as 0/1, but the table shows false/true, so
+  // mirror that here instead of surfacing the raw numeric encoding.
+  if (isBoolean || typeof raw === 'boolean') return (raw === 1 || raw === true) ? 'true' : 'false';
   if (raw === null || raw === undefined || raw === '') return '-';
   const numeric = Number(raw);
   if (!Number.isFinite(numeric)) return String(raw);
@@ -102,6 +105,6 @@ export function buildTooltipMarkup(params: TooltipSeriesParam[]): string {
   const ordered = [...params].sort((left, right) => left.seriesIndex - right.seriesIndex);
   const rows = ordered.map((param) => '<div style="display:flex;align-items:center;gap:6px">'
     + `${param.marker ?? ''}<span style="flex:1">${escapeHtml(param.seriesName ?? '')}</span>`
-    + `<b style="font-weight:700;margin-left:24px">${formatTooltipValue(param.value)}</b></div>`);
+    + `<b style="font-weight:700;margin-left:24px">${formatTooltipValue(param.value, param.isBoolean)}</b></div>`);
   return `<div style="font-weight:600;margin-bottom:4px">${escapeHtml(ordered[0].axisValueLabel ?? '')}</div>${rows.join('')}`;
 }
