@@ -45,7 +45,7 @@ export function MainChart({ dataset, selected, xAxis, mode }: MainChartProps) {
         top: `${7 + index * (82 / columns.length)}%`,
         height: `${Math.max(10, 72 / columns.length)}%`,
       }))
-    : [{ left: 64, right: mode === 'individual' ? 54 : 30, top: 62, bottom: 72 }];
+    : [{ left: 70, right: mode === 'individual' ? 72 + Math.max(0, columns.length - 2) * 58 : 34, top: 62, bottom: 96 }];
 
   const option = {
     animation: false,
@@ -80,7 +80,9 @@ export function MainChart({ dataset, selected, xAxis, mode }: MainChartProps) {
       name: index === (stacked ? columns.length - 1 : 0)
         ? xAxisName
         : '',
-      nameTextStyle: { fontSize: 14, fontWeight: 600, padding: [10, 0, 0, 0] },
+      nameLocation: 'middle',
+      nameGap: 42,
+      nameTextStyle: { fontSize: 14, fontWeight: 600 },
       axisLine: { lineStyle: { color: '#687b83', width: 1.5 } },
       axisTick: { lineStyle: { width: 1.5 }, length: 6 },
       axisLabel: { color: '#455b64', fontSize: 13, margin: 10, show: !stacked || index === columns.length - 1, hideOverlap: true },
@@ -96,8 +98,8 @@ export function MainChart({ dataset, selected, xAxis, mode }: MainChartProps) {
       scale: column.type !== 'boolean',
       min: column.type === 'boolean' ? -0.1 : undefined,
       max: column.type === 'boolean' ? 1.1 : undefined,
-      position: !stacked && index % 2 ? 'right' : 'left',
-      offset: !stacked && index > 1 ? Math.floor(index / 2) * 44 : 0,
+      position: !stacked && index > 0 ? 'right' : 'left',
+      offset: !stacked && index > 1 ? (index - 1) * 58 : 0,
       axisLine: { show: true, lineStyle: { color: palette[index % palette.length], width: 1.6 } },
       axisTick: { show: true, lineStyle: { color: palette[index % palette.length], width: 1.4 } },
       axisLabel: { color: palette[index % palette.length], fontSize: 13, fontWeight: 500, margin: 10 },
