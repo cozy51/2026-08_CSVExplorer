@@ -1,5 +1,6 @@
 import ReactECharts from 'echarts-for-react';
 import type { ColumnDefinition, ParsedDataset } from '../models/dataset';
+import { buildNiceTickIndexes } from '../services/chart';
 
 export type ChartMode = 'individual' | 'normalized' | 'stacked';
 
@@ -38,14 +39,35 @@ export function MainChart({ dataset, selected, xAxis, mode }: MainChartProps) {
     ? 'Row'
     : `${selectedXAxis?.name ?? ''}${dataset.metadata.xAxisDisplayUnit ? ` [${dataset.metadata.xAxisDisplayUnit}]` : ''}`;
   const stacked = mode === 'stacked';
-  const grids = stacked
-    ? columns.map((_, index) => ({
+  const analogColumns = columns.filter((column) => column.type !== 'boolean');
+  const booleanColumns = columns.filter((column) => column.type === 'boolean');
+  const hybrid = !stacked && analogColumns.length > 0 && booleanColumns.length > 0;
+  const panelColumns = stacked || analogColumns.length === 0 ? columns : booleanColumns;
+  const mainHeight = Math.max(40, 66 - booleanColumns.length * 9);
+  const grids = stacked || analogColumns.length === 0
+    ? panelColumns.map((_, index) => ({
         left: 70,
         right: 34,
-        top: `${7 + index * (82 / columns.length)}%`,
-        height: `${Math.max(10, 72 / columns.length)}%`,
+        top: `${7 + index * (82 / panelColumns.length)}%`,
+        height: `${Math.max(9, 70 / panelColumns.length)}%`,
       }))
-    : [{ left: 70, right: mode === 'individual' ? 72 + Math.max(0, columns.length - 2) * 58 : 34, top: 62, bottom: 96 }];
+    : hybrid
+      ? [
+          { left: 70, right: mode === 'individual' ? 72 + Math.max(0, analogColumns.length - 2) * 58 : 34, top: 62, height: `${mainHeight}%` },
+          ...booleanColumns.map((_, index) => ({
+            left: 70,
+            right: 34,
+            top: `${14 + mainHeight + index * 10}%`,
+            height: '7%',
+          })),
+        ]
+      : [{ left: 70, right: mode === 'individual' ? 72 + Math.max(0, analogColumns.length - 2) * 58 : 34, top: 62, bottom: 96 }];
+  const gridIndexFor = (column: ColumnDefinition, columnIndex: number) => {
+    if (stacked || analogColumns.length === 0) return columnIndex;
+    if (hybrid && column.type === 'boolean') return booleanColumns.indexOf(column) + 1;
+    return 0;
+  };
+  const niceTickIndexes = buildNiceTickIndexes(xValues);
 
   const option = {
     animation: false,
@@ -68,16 +90,17 @@ export function MainChart({ dataset, selected, xAxis, mode }: MainChartProps) {
       borderColor: '#ccd4d8',
       textStyle: { color: '#22313a', fontSize: 14, lineHeight: 22 },
     },
+    axisPointer: { link: [{ xAxisIndex: 'all' }] },
     toolbox: {
       right: 18,
       feature: { dataZoom: { yAxisIndex: 'none' }, restore: {}, saveAsImage: { pixelRatio: 2 } },
     },
-    xAxis: (stacked ? columns : [undefined]).map((_, index) => ({
+    xAxis: grids.map((_, index) => ({
       type: 'category',
-      gridIndex: stacked ? index : 0,
+      gridIndex: index,
       data: xValues,
       boundaryGap: false,
-      name: index === (stacked ? columns.length - 1 : 0)
+      name: index === grids.length - 1
         ? xAxisName
         : '',
       nameLocation: 'middle',
@@ -85,34 +108,45 @@ export function MainChart({ dataset, selected, xAxis, mode }: MainChartProps) {
       nameTextStyle: { fontSize: 14, fontWeight: 600 },
       axisLine: { lineStyle: { color: '#687b83', width: 1.5 } },
       axisTick: { lineStyle: { width: 1.5 }, length: 6 },
-      axisLabel: { color: '#455b64', fontSize: 13, margin: 10, show: !stacked || index === columns.length - 1, hideOverlap: true },
+      axisLabel: {
+        color: '#455b64',
+        fontSize: 13,
+        margin: 10,
+        show: index === grids.length - 1,
+        interval: (tickIndex: number) => niceTickIndexes.has(tickIndex),
+        formatter: (value: string) => {
+          const numeric = Number(value);
+          return Number.isFinite(numeric) ? Number(numeric.toPrecision(10)).toLocaleString() : value;
+        },
+        hideOverlap: true,
+      },
       axisPointer: { show: true, snap: true },
     })),
     yAxis: columns.map((column, index) => ({
       type: 'value',
-      gridIndex: stacked ? index : 0,
-      name: stacked ? `${column.name}${column.unit ? ` [${column.unit}]` : ''}` : undefined,
+      gridIndex: gridIndexFor(column, index),
+      name: (stacked || column.type === 'boolean') ? `${column.name}${column.unit ? ` [${column.unit}]` : ''}` : undefined,
       nameLocation: 'middle',
       nameGap: stacked ? 52 : 40,
       nameTextStyle: { fontSize: 13, fontWeight: 600 },
       scale: column.type !== 'boolean',
       min: column.type === 'boolean' ? -0.1 : undefined,
       max: column.type === 'boolean' ? 1.1 : undefined,
-      position: !stacked && index > 0 ? 'right' : 'left',
-      offset: !stacked && index > 1 ? (index - 1) * 58 : 0,
+      position: !stacked && column.type !== 'boolean' && analogColumns.indexOf(column) > 0 ? 'right' : 'left',
+      offset: !stacked && column.type !== 'boolean' && analogColumns.indexOf(column) > 1 ? (analogColumns.indexOf(column) - 1) * 58 : 0,
       axisLine: { show: true, lineStyle: { color: palette[index % palette.length], width: 1.6 } },
       axisTick: { show: true, lineStyle: { color: palette[index % palette.length], width: 1.4 } },
       axisLabel: { color: palette[index % palette.length], fontSize: 13, fontWeight: 500, margin: 10 },
       splitLine: { lineStyle: { color: '#dce3e5', width: 1.2 } },
     })),
     dataZoom: [
-      { type: 'inside', xAxisIndex: stacked ? columns.map((_, index) => index) : [0], filterMode: 'none' },
-      { type: 'slider', xAxisIndex: stacked ? columns.map((_, index) => index) : [0], height: 22, bottom: 14 },
+      { type: 'inside', xAxisIndex: grids.map((_, index) => index), filterMode: 'none' },
+      { type: 'slider', xAxisIndex: grids.map((_, index) => index), height: 22, bottom: 14 },
     ],
     series: columns.map((column, index) => ({
       name: column.name,
       type: 'line',
-      xAxisIndex: stacked ? index : 0,
+      xAxisIndex: gridIndexFor(column, index),
       yAxisIndex: index,
       data: dataset.rows.map((row) => {
         const value = numericValue(row[column.id]);
