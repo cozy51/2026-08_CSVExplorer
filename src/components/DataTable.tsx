@@ -20,6 +20,7 @@ export function DataTable({ columns, rowCount, storeKey, xAxisId, xAxisName, jum
   const [rows, setRows] = useState<Awaited<ReturnType<typeof readDatasetRows>>>([]);
   const [highlightRow, setHighlightRow] = useState<number>();
   const [searchMessage, setSearchMessage] = useState('');
+  const lastScrolledRow = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     if (!storeKey) return;
@@ -30,9 +31,16 @@ export function DataTable({ columns, rowCount, storeKey, xAxisId, xAxisName, jum
     return () => { active = false; };
   }, [start, storeKey]);
 
+  useEffect(() => {
+    if (highlightRow === undefined || lastScrolledRow.current === highlightRow) return;
+    if (!rows.some(record => record.index === highlightRow) || !scrollRef.current) return;
+    lastScrolledRow.current = highlightRow;
+    scrollRef.current.scrollTop = Math.max(0, highlightRow - 6) * ROW_HEIGHT;
+  }, [highlightRow, rows]);
+
   const jumpToRow = (rowIndex: number, message: string) => {
     const nextStart = Math.max(0, Math.min(rowIndex - 8, Math.max(0, rowCount - WINDOW_ROWS)));
-    if (scrollRef.current) scrollRef.current.scrollTop = nextStart * ROW_HEIGHT;
+    lastScrolledRow.current = undefined;
     setStart(nextStart);
     setHighlightRow(rowIndex);
     setSearchMessage(message);

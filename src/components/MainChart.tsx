@@ -28,9 +28,15 @@ function normalizedValue(value: number | null, column: ColumnDefinition): number
 
 export function MainChart({ dataset, selected, xAxis, mode, appearances }: MainChartProps) {
   const chartRef = useRef<ReactECharts>(null);
-  const columns = selected
+  const selectedColumns = selected
     .map((id) => dataset.columns.find((column) => column.id === id))
     .filter((column): column is ColumnDefinition => Boolean(column));
+  const analogColumns = selectedColumns.filter((column) => column.type !== 'boolean');
+  const booleanColumns = selectedColumns.filter((column) => column.type === 'boolean');
+  // The visual stack is the canonical order: analog plots first, Boolean
+  // panels last. ECharts uses this same order for legend and tooltip entries.
+  const columns = [...analogColumns, ...booleanColumns];
+  const yAxisCount = columns.length;
   const xScale = xAxis === dataset.metadata.xAxisId ? (dataset.metadata.xAxisScale ?? 1) : 1;
   const xValues = dataset.rows.map((row, index) => {
     if (xAxis === '__index') return index + 1;
@@ -42,8 +48,6 @@ export function MainChart({ dataset, selected, xAxis, mode, appearances }: MainC
     ? 'Row'
     : `${selectedXAxis?.name ?? ''}${dataset.metadata.xAxisDisplayUnit ? ` [${dataset.metadata.xAxisDisplayUnit}]` : ''}`;
   const stacked = mode === 'stacked';
-  const analogColumns = columns.filter((column) => column.type !== 'boolean');
-  const booleanColumns = columns.filter((column) => column.type === 'boolean');
   const hybrid = !stacked && analogColumns.length > 0 && booleanColumns.length > 0;
   const panelColumns = stacked || analogColumns.length === 0 ? columns : booleanColumns;
   const mainHeight = Math.max(40, 66 - booleanColumns.length * 9);
@@ -92,14 +96,17 @@ export function MainChart({ dataset, selected, xAxis, mode, appearances }: MainC
       if (wheelZoomAxis(event.shiftKey) === 'x') return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      const zoom = (instance.getOption().dataZoom as Array<{ id?: string; start?: number; end?: number }> | undefined)
-        ?.find(item => item.id === 'y-wheel-zoom');
-      const next = computeZoomWindow(zoom?.start ?? 0, zoom?.end ?? 100, event.deltaY < 0);
-      instance.dispatchAction({ type: 'dataZoom', dataZoomId: 'y-wheel-zoom', ...next });
+      const zoomOptions = instance.getOption().dataZoom as Array<{ id?: string; start?: number; end?: number }> | undefined;
+      for (let index = 0; index < yAxisCount; index += 1) {
+        const dataZoomId = `y-wheel-zoom-${index}`;
+        const zoom = zoomOptions?.find(item => item.id === dataZoomId);
+        const next = computeZoomWindow(zoom?.start ?? 0, zoom?.end ?? 100, event.deltaY < 0);
+        instance.dispatchAction({ type: 'dataZoom', dataZoomId, ...next });
+      }
     };
     chartElement.addEventListener('wheel', handleShiftWheel, { capture: true, passive: false });
     return () => chartElement.removeEventListener('wheel', handleShiftWheel, { capture: true });
-  }, []);
+  }, [yAxisCount]);
 
   const option = {
     animation: false,
@@ -118,6 +125,7 @@ export function MainChart({ dataset, selected, xAxis, mode, appearances }: MainC
     },
     tooltip: {
       trigger: 'axis',
+      order: 'seriesAsc',
       axisPointer: { type: 'cross', snap: true },
       backgroundColor: 'rgba(255,255,255,.97)',
       borderColor: '#ccd4d8',
@@ -180,15 +188,15 @@ export function MainChart({ dataset, selected, xAxis, mode, appearances }: MainC
     dataZoom: [
       { id: 'x-wheel-zoom', type: 'inside', xAxisIndex: grids.map((_, index) => index), filterMode: 'none', zoomOnMouseWheel: true, moveOnMouseWheel: false },
       { type: 'slider', xAxisIndex: grids.map((_, index) => index), height: 22, bottom: 14 },
-      {
-        id: 'y-wheel-zoom',
+      ...columns.map((_, index) => ({
+        id: `y-wheel-zoom-${index}`,
         type: 'inside',
-        yAxisIndex: columns.map((_, index) => index),
+        yAxisIndex: index,
         filterMode: 'none',
         zoomOnMouseWheel: false,
         moveOnMouseWheel: false,
         moveOnMouseMove: false,
-      },
+      })),
     ],
     series: columns.map((column, index) => ({
       name: column.name,
