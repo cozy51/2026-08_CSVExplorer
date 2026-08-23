@@ -94,12 +94,26 @@ describe('CSV parsing', () => {
     const dataset = parseWithFormat({ fileName: 'trc_0001.csv', text: traceSample });
     const groupOf = (name: string) => dataset.columns.find((column) => column.name === name)?.group;
     expect(groupOf('時間')).toBeUndefined();
-    expect(groupOf('ポイント')).toBe('位置');
-    expect(groupOf('昇降位置')).toBe('位置');
-    expect(groupOf('検出エリア')).toBe('衝突防止センサ(上)');
-    const reset = dataset.columns.find((column) => column.name === 'パネルアラームリセット')!;
+    expect(groupOf('位置-ポイント')).toBe('位置');
+    expect(groupOf('位置-昇降位置')).toBe('位置');
+    expect(groupOf('衝突防止センサ(上)-検出エリア')).toBe('衝突防止センサ(上)');
+    const reset = dataset.columns.find((column) => column.name === 'X00-パネルアラームリセット')!;
     expect(reset.group).toBe('X00');
     expect(reset.type).toBe('boolean');
+  });
+
+  it('titles every classified column with its block so repeated names stay apart', () => {
+    const dataset = parseWithFormat({ fileName: 'trc_0001.csv', text: traceSample });
+    const titles = dataset.columns.map((column) => column.name);
+    // 時間, msec, アラーム and サブコード have no classification of their own.
+    expect(titles.slice(1, 5)).toEqual(['時間', 'msec', 'アラーム', 'サブコード']);
+    expect(titles).toContain('位置-走行位置');
+    expect(titles).toContain('衝突防止センサ(上)-状態');
+    expect(titles).toContain('衝突防止センサ(上)-検出エリア');
+    // Numbered fallbacks are only needed when the classified title still repeats.
+    expect(titles.filter((title) => /\(\d\)$/.test(title))).toEqual([]);
+    expect(traceInternals.classifiedNames(['状態', 'リモートI/O割込み'], ['障害物センサ(下)', 'X19']))
+      .toEqual(['障害物センサ(下)-状態', 'X19-リモートI/O割込み']);
   });
 
   it('carries the final classification block to columns the row stops short of', () => {
@@ -107,13 +121,32 @@ describe('CSV parsing', () => {
       .toEqual(['', '', 'ハンド入力', 'ハンド入力', 'ハンド出力', 'ハンド出力', 'ハンド出力']);
   });
 
-  it('builds the X axis from 時間 and msec as elapsed seconds', () => {
+  it('spreads the samples evenly over the seconds the log spans', () => {
     const dataset = parseWithFormat({ fileName: 'trc_0001.csv', text: traceSample });
     expect(dataset.metadata.xAxisId).toBe('__elapsed');
-    expect(dataset.metadata.xAxisScale).toBe(0.001);
     expect(dataset.metadata.xAxisDisplayUnit).toBe('s');
-    expect(dataset.metadata.durationMs).toBe(1005);
-    expect(dataset.rows.map((row) => row.__elapsed)).toEqual([0, 2, 1005]);
+    expect(dataset.metadata.durationMs).toBe(1000);
+    expect(dataset.columns[0].unit).toBe('s');
+    // The jittering msec cells are ignored: 3 samples over 1 s land 0.5 s apart.
+    expect(dataset.rows.map((row) => row.__elapsed)).toEqual([0, 0.5, 1]);
+    expect(dataset.metadata.details.sampleIntervalMs).toBe(500);
+  });
+
+  it('reads a 3,000 row recording as 30 seconds at a 10 ms period', () => {
+    // Recording starts partway into a second, exactly like a captured log.
+    const rows = Array.from({ length: 3000 }, (_, index) => {
+      const second = 249 + Math.floor((index + 65) / 100);
+      const clock = `00:${String(Math.floor(second / 60)).padStart(2, '0')}:${String(second % 60).padStart(2, '0')}`;
+      return `${clock},${String(index % 1000).padStart(3, '0')},${index % 2},`;
+    });
+    const dataset = parseWithFormat({
+      fileName: 'trc_0003.csv',
+      text: `時間,msec,値,\n${rows.join('\n')}`,
+    });
+    const elapsed = dataset.rows.map((row) => Number(row.__elapsed));
+    expect(elapsed[0]).toBe(0);
+    expect(elapsed.at(-1)).toBe(30);
+    expect(dataset.metadata.details.sampleIntervalMs).toBeCloseTo(10, 2);
   });
 
   it('keeps the elapsed time rising when the log clock passes midnight', () => {
@@ -121,7 +154,7 @@ describe('CSV parsing', () => {
       fileName: 'trc_0002.csv',
       text: '時間,msec,値,\n23:59:59,900,1,\n00:00:00,100,2,',
     });
-    expect(dataset.rows.map((row) => row.__elapsed)).toEqual([0, 200]);
+    expect(dataset.rows.map((row) => row.__elapsed)).toEqual([0, 1]);
   });
 
   it('keeps support for the original trace timestamp format', () => {
@@ -131,6 +164,6 @@ describe('CSV parsing', () => {
     });
     expect(dataset.metadata.formatId).toBe('trace');
     expect(dataset.metadata.xAxisId).toBe('__elapsed');
-    expect(dataset.rows.map((row) => row.__elapsed)).toEqual([0, 1000]);
+    expect(dataset.rows.map((row) => row.__elapsed)).toEqual([0, 1]);
   });
 });
